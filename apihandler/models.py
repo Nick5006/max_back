@@ -138,3 +138,39 @@ class JKDomik(models.Model):
 
     def __str__(self):
         return f"{self.user} @ {self.domik}"
+
+class Appeal(models.Model):
+    class Status(models.TextChoices):
+        NEW = "new", "Новая"
+        IN_PROGRESS = "in_progress", "В работе"
+        DONE = "done", "Выполнена"
+        REJECTED = "rejected", "Отклонена"
+
+    id = models.UUIDField(primary_key = True, default=uuid.uuid4, editable = False)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="appeals")
+    domik = models.ForeignKey(Domik, on_delete=models.CASCADE, related_name="appeals")
+    apartment = models.ForeignKey(Apartment, on_delete=models.SET_NULL, related_name="appeals", null = True, blank=True)
+    title = models.CharField(max_length = 200)
+    description = models.TextField()
+    status = models.CharField(max_length = 30, choices=Status.choices, default=Status.NEW)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.id}"
+
+class AppealHistory(models.Model):
+    appeal = models.ForeignKey(Appeal, on_delete=models.CASCADE, related_name="appeal_history")
+    status = models.CharField(max_length = 30, choices=Appeal.Status.choices)
+    changed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    text = models.TextField(blank=True)
+
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["changed_at"]
+
+
+
+
+
