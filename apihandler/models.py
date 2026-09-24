@@ -91,7 +91,7 @@ class Apartment(models.Model):
         ordering = ["domik__address", "number"]
 
     def __str__(self):
-        return f"{self.domik.address}, кв. {self.number}, id {self.id}"
+        return f"{self.domik.address}, кв. {self.number}"
 
 
 class UserApartment(models.Model):

@@ -5,8 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 import json
 from apihandler.serializers.appeal import AppealCreateSerializer
-
-from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment
+from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment, Domik
 
 
 def parse_json(request):
@@ -62,7 +61,7 @@ def create_apartment_view(request):
     apartment = Apartment.objects.filter(domik_id=domik_id, number=number).first()
 
     if apartment is None:
-        return JsonResponse({"status": "Квартира не найдена"}, status=400)
+        return JsonResponse({"status": "Квартира не найдена"}, status=404)
 
     user_apartment, created = UserApartment.objects.get_or_create(user=request.user, apartment=apartment, defaults={"role": UserApartment.Role.RESIDENT})
 
@@ -111,6 +110,7 @@ def create_appeals_view(request):
         "id": appeal.id,
         "title": appeal.title,
         "description": appeal.description,
+        "management_org": apartment.domik.management_org,
         "status": appeal.status,
         "created_at": appeal.created_at
     }, status=201)
