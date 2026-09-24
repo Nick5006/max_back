@@ -5,9 +5,14 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 import json
 from apihandler.serializers.appeal import AppealCreateSerializer
-
 from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment
+import uuid as uuid_lib
+from django.db import transaction
 
+from apihandler.models import Domik, Apartment, JKDomik
+
+
+MAX_APARTMENTS_PER_HOUSE = 1000
 
 def parse_json(request):
     try:
@@ -116,4 +121,76 @@ def create_appeals_view(request):
     }, status=201)
 
 
+@csrf_exempt
+@require_POST
+@login_required
+def create_domik_view(request):
+    if not request.user.is_jk:
+        return JsonResponse({"status": "Только для сотрудников УК"}, status=403)
+
+    data, error = parse_json(request)
+    if error:
+        return error
+
+    address = (data.get("address") or "").strip()
+    fias_id = (data.get("fias_id") or "").strip()
+    management_org = (data.get("management_org") or "").strip()
+    apartments = data.get("apartments") or {}
+
+    if not address:
+        return JsonResponse({"status": "Поле address обязательно"}, status=400)
+
+    if fias_id and Domik.objects.filter(fias_id=fias_id).exists():
+        return JsonResponse({"status": "Дом с таким ФИАС ID уже существует"}, status=409)
+
+    if Domik.objects.filter(address=address).exists():
+        return JsonResponse({"status": "Дом с таким адресом уже существует"}, status=409)
+
+    from_num = apartments.get("from")
+    to_num = apartments.get("to")
+    entrance = (apartments.get("entrance") or "").strip()
+
+    if from_num is None or to_num is None:
+        return JsonResponse({"status": "Нужны apartments.from и apartments.to"}, status=400)
+
+    try:
+        from_num = int(from_num)
+        to_num = int(to_num)
+    except (ValueError, TypeError):
+        return JsonResponse({"status": "from и to должны быть целыми числами"}, status=400)
+
+    if from_num < 1:
+        return JsonResponse({"status": "from должен быть >= 1"}, status=400)
+
+    if to_num < from_num:
+        return JsonResponse({"status": "to должен быть >= from"}, status=400)
+
+    total = to_num - from_num + 1
+    if total > MAX_APARTMENTS_PER_HOUSE:
+        return JsonResponse(
+            {"status": f"Слишком большой диапазон: макс {MAX_APARTMENTS_PER_HOUSE} квартир"},
+            status=400,
+        )
+
+    with transaction.atomic():
+        domik = Domik.objects.create(
+            address=address,
+            fias_id=fias_id,
+            management_org=management_org,
+        )
+
+        JKDomik.objects.create(user=request.user, domik=domik)
+
+        apartments_to_create = [
+            Apartment(domik=domik, number=str(n), entrance=entrance)
+            for n in range(from_num, to_num + 1)
+        ]
+        Apartment.objects.bulk_create(apartments_to_create)
+
+    return JsonResponse({
+        "status": "ok",
+        "domik_id": str(domik.id),
+        "address": domik.address,
+        "apartments_created": len(apartments_to_create),
+    }, status=201)
 
