@@ -18,13 +18,13 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
-from apihandler.views import login_view, create_appeals_view, create_apartment_view, create_domik_view
+from apihandler.views import login_view, appeals_view, create_apartment_view, create_domik_view
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/login', login_view),
     path('api/v1/user/apartments', create_apartment_view),
-    path('api/v1/user/appeals', create_appeals_view),
+    path('api/v1/user/appeals', appeals_view),
     path('api/v1/uk/domiks', create_domik_view),
 ]

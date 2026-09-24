@@ -2,9 +2,9 @@ from django.contrib.auth import login
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 import json
-from apihandler.serializers.appeal import AppealCreateSerializer
+from apihandler.serializers.appeal import AppealCreateSerializer, AppealListSerializer
 from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment
 import uuid as uuid_lib
 from django.db import transaction
@@ -82,9 +82,20 @@ def create_apartment_view(request):
     }, status=201)
 
 @csrf_exempt
-@require_POST
 @login_required
-def create_appeals_view(request):
+def appeals_view(request):
+    if request.method == "GET":
+        return get_appeals(request)
+
+    if request.method == "POST":
+        return create_appeal(request)
+
+    return JsonResponse(
+        {"status": "Method not allowed"},
+        status=405,
+    )
+
+def create_appeal(request):
     data, error = parse_json(request)
     if error:
         return error
@@ -120,6 +131,13 @@ def create_appeals_view(request):
         "status": appeal.status,
         "created_at": appeal.created_at
     }, status=201)
+
+
+def get_appeals(request):
+    appeals = Appeal.objects.filter(author=request.user).select_related("apartment", "domik").order_by("-created_at")
+    serializer = AppealCreateSerializer(appeals, many=True)
+
+    return JsonResponse({"appeals": serializer.data}, status=200)
 
 
 @csrf_exempt
