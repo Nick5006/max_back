@@ -4,14 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="7e093c5e-7c56-4046-975f-d4dee704b4a3" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/api/settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/api/settings.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apihandler/admin.py" beforeDir="false" afterPath="$PROJECT_DIR$/apihandler/admin.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apihandler/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/apihandler/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/apihandler/views.py" beforeDir="false" afterPath="$PROJECT_DIR$/apihandler/views.py" afterDir="false" />
-    </list>
+    <list default="true" id="7e093c5e-7c56-4046-975f-d4dee704b4a3" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -63,5 +56,15 @@
         </entry>
       </map>
     </option>
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/apihandler/gis_api/collect.py</url>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
 </project>
