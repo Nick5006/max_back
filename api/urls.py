@@ -20,7 +20,7 @@ from apihandler.views import login_view, create_appeals_view, create_apartment_v
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/v1/login', login_view),
-    path('api/v1/appeals', create_appeals_view),
-    path('api/v1/apartments', create_apartment_view),
+    path('api/v1/user/login', login_view),
+    path('api/v1/user/appeals', create_appeals_view),
+    path('api/v1/user/apartments', create_apartment_view),
 ]

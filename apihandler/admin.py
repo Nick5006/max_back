@@ -7,6 +7,8 @@ from .models import (
     Apartment,
     UserApartment,
     JKDomik,
+    Appeal,
+    AppealHistory
 )
 
 
@@ -93,3 +95,16 @@ class JKDomikAdmin(admin.ModelAdmin):
     list_display = ("user", "domik")
     search_fields = ("user__max_id", "user__name", "domik__address")
     autocomplete_fields = ("user", "domik")
+
+class AppealHistoryInline(admin.TabularInline):
+    model = AppealHistory
+    extra = 0
+    readonly_fields = ("status", "changed_by", "changed_at")
+
+
+@admin.register(Appeal)
+class AppealAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "author", "apartment", "status", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("title", "description")
+    inlines = [AppealHistoryInline]
