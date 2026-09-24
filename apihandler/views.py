@@ -135,7 +135,7 @@ def create_appeal(request):
 
 def get_appeals(request):
     appeals = Appeal.objects.filter(author=request.user).select_related("apartment", "domik").order_by("-created_at")
-    serializer = AppealCreateSerializer(appeals, many=True)
+    serializer = AppealListSerializer(appeals, many=True)
 
     return JsonResponse({"appeals": serializer.data}, status=200)
 

@@ -4,7 +4,7 @@ from apihandler.models import (User, Domik, Apartment, UserApartment, Appeal, Ap
 
 class ApiTestCase(TestCase):
     def setUp(self):
-        self.login_url = "/api/v1/user/login"
+        self.login_url = "/api/v1/login"
         self.apartments_url = "/api/v1/user/apartments"
         self.appeals_url = "/api/v1/user/appeals"
 
@@ -238,6 +238,83 @@ class ApiTestCase(TestCase):
         self.assertEqual(
             Appeal.objects.count(),
             0,
+        )
+
+    def test_get_user_appeals(self):
+        self.login_user()
+
+        UserApartment.objects.create(
+            user=self.user,
+            apartment=self.apartment,
+            role=UserApartment.Role.RESIDENT,
+        )
+
+        appeal = Appeal.objects.create(
+            author=self.user,
+            apartment=self.apartment,
+            domik=self.domik,
+            title="Не работает ничего",
+            description="НЕ ПОН",
+            status=Appeal.Status.NEW,
+        )
+
+        response = self.client.get(
+            self.appeals_url
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        data = response.json()
+
+        self.assertEqual(
+            len(data["appeals"]),
+            1,
+        )
+
+        self.assertEqual(
+            data["appeals"][0]["id"],
+            str(appeal.id),
+        )
+
+        self.assertEqual(
+            data["appeals"][0]["title"],
+            "Не работает ничего",
+        )
+
+    def test_get_appeals_does_not_return_other_users_appeals(self):
+        self.login_user()
+
+        another_user = User.objects.create_user(
+            max_id="another-user1",
+            name="pon",
+        )
+
+        Appeal.objects.create(
+            author=another_user,
+            apartment=self.apartment,
+            domik=self.domik,
+            title="Чужая заявка",
+            description="ПОН",
+            status=Appeal.Status.NEW,
+        )
+
+        response = self.client.get(
+            self.appeals_url
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        data = response.json()
+
+        self.assertEqual(
+            data["appeals"],
+            [],
         )
 
 
