@@ -91,7 +91,7 @@ class Apartment(models.Model):
         ordering = ["domik__address", "number"]
 
     def __str__(self):
-        return f"{self.domik.address}, кв. {self.number}"
+        return f"{self.domik.address}, кв. {self.number}, id {self.id}"
 
 
 class UserApartment(models.Model):
@@ -157,7 +157,7 @@ class Appeal(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.id}"
+        return f"{self.title}"
 
 class AppealHistory(models.Model):
     appeal = models.ForeignKey(Appeal, on_delete=models.CASCADE, related_name="appeal_history")
