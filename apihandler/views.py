@@ -23,6 +23,12 @@ def uk_required(view):
     return wrapper
 
 
+def serialize_management_org(org):
+    if org is None:
+        return None
+    return {"id": str(org.id), "name": org.name}
+
+
 MAX_APARTMENTS_PER_HOUSE = 1000
 
 
@@ -142,10 +148,10 @@ def create_appeal(request):
     )
 
     return JsonResponse({
-        "id": appeal.id,
+        "id": str(appeal.id),
         "title": appeal.title,
         "description": appeal.description,
-        "management_org": apartment.domik.management_org,
+        "management_org": serialize_management_org(apartment.domik.management_org),
         "status": appeal.status,
         "created_at": appeal.created_at
     }, status=201)
@@ -177,7 +183,7 @@ def me_view(request):
                 "entrance": ua.apartment.entrance,
                 "domik_id": str(ua.apartment.domik.id),
                 "domik_address": ua.apartment.domik.address,
-                "management_org": ua.apartment.domik.management_org,
+                "management_org": serialize_management_org(ua.apartment.domik.management_org),
                 "role": ua.role,
                 "role_display": ua.get_role_display(),
                 "is_primary": ua.is_primary,
@@ -208,7 +214,7 @@ def list_user_apartments(request):
                 "entrance": ua.apartment.entrance,
                 "domik_id": str(ua.apartment.domik.id),
                 "domik_address": ua.apartment.domik.address,
-                "management_org": ua.apartment.domik.management_org,
+                "management_org": serialize_management_org(ua.apartment.domik.management_org),
                 "role": ua.role,
                 "role_display": ua.get_role_display(),
                 "is_primary": ua.is_primary,
@@ -279,7 +285,7 @@ def appeal_detail_view(request, appeal_id):
         "domik": {
             "id": str(appeal.domik.id),
             "address": appeal.domik.address,
-            "management_org": appeal.domik.management_org,
+            "management_org": serialize_management_org(appeal.domik.management_org),
         },
         "apartment": {
             "id": str(appeal.apartment.id),
@@ -319,7 +325,7 @@ def list_uk_domiks(request):
                 "id": str(d.id),
                 "address": d.address,
                 "fias_id": d.fias_id,
-                "management_org": d.management_org,
+                "management_org": serialize_management_org(d.management_org),
                 "apartments_count": d.apartments.count(),
                 "appeals_count": d.appeals.count(),
                 "new_appeals_count": d.appeals.filter(status=Appeal.Status.NEW).count(),
@@ -397,10 +403,7 @@ def create_domik(request):
         "status": "ok",
         "domik_id": str(domik.id),
         "address": domik.address,
-        "management_org": {
-            "id": str(management_org.id),
-            "name": management_org.name,
-        },
+        "management_org": serialize_management_org(management_org),
         "apartments_created": len(apartments_to_create),
     }, status=201)
 
@@ -422,7 +425,7 @@ def uk_domik_detail_view(request, domik_id):
         "id": str(domik.id),
         "address": domik.address,
         "fias_id": domik.fias_id,
-        "management_org": domik.management_org,
+        "management_org": serialize_management_org(domik.management_org),
         "created_at": domik.created_at,
         "apartments": [
             {
