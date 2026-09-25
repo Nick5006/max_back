@@ -23,3 +23,9 @@ class DataCollector:
 
         except httpx.HTTPError as err:
             raise err
+
+    def get_houses(self, page_size: int = 10, page: int = 1):
+        response = httpx.get(f"https://housescore.ru/api/houses", headers = {"Authorization": f"Bearer {self.housescore_token}"}, params = {"page_size": page_size, "page": page}, timeout = 10.0)
+        response.raise_for_status()
+
+        return response.json()
