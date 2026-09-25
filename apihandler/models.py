@@ -49,6 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     max_id = models.CharField(max_length=100, unique=True, db_index=True)
     name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100, blank=True)
+    management_org = models.ForeignKey("ManagementOrganization", on_delete=models.SET_NULL, blank=True, null=True, related_name="jk_users")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_jk = models.BooleanField(default=False)
@@ -65,12 +66,21 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return self.max_id
 
+class ManagementOrganization(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    inn = models.CharField(max_length=12, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
 
 class Domik(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     address = models.CharField(max_length=255)
     fias_id = models.CharField(max_length=100, blank=True)
-    management_org = models.CharField(max_length=255, blank=True)
+    management_org = models.ForeignKey("ManagementOrganization", on_delete=models.SET_NULL, blank=True, null=True, related_name="domiks")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

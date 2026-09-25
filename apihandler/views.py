@@ -5,7 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST, require_GET
 import json
 from apihandler.serializers.appeal import AppealCreateSerializer, AppealListSerializer
-from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment
+from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment, ManagementOrganization
 import uuid as uuid_lib
 from django.db import transaction
 
@@ -38,17 +38,52 @@ def login_view(request):
         user = User.objects.get(max_id=max_id)
         login(request, user)
         return JsonResponse(
-            {'status': 'Такой пользователь уже существует', 'id': str(user.id)},
+            {'status': 'Такой пользователь уже существует', 'id': str(user.id), 'is_jk': user.is_jk},
             status=200,
         )
 
-    try:
-        user = User.objects.create_user(max_id=max_id, name=name)
-    except ValueError as e:
-        return JsonResponse({'status': str(e)}, status=400)
+    is_jk = data.get("is_jk", False)
+
+    if is_jk:
+        management_data = data.get("management_org")
+
+        if not management_data:
+            return JsonResponse({"status": "Для сотрудника УК необходимо указать management_org"}, status=400)
+
+        org_name = management_data.get("name")
+        org_inn = management_data.get("inn")
+
+        if not org_name or not org_inn:
+            return JsonResponse({"status": "Для management_org нужны поля name и inn"}, status=400)
+
+        management_org, created = ManagementOrganization.objects.get_or_create(inn=org_inn, defaults = {"name": org_name})
+
+        try:
+            user = User.objects.create_jkuser(max_id=max_id, name=name, management_org=management_org)
+        except ValueError as e:
+            return JsonResponse({'status': str(e)}, status=400)
+
+    else:
+        try:
+            user = User.objects.create_user(max_id=max_id, name=name)
+        except ValueError as e:
+            return JsonResponse({'status': str(e)}, status=400)
 
     login(request, user)
-    return JsonResponse({'status': 'ok', 'id': str(user.id)}, status=200)
+    return JsonResponse({
+        "status": "ok",
+        "id": str(user.id),
+        "is_jk": user.is_jk,
+        "management_org": (
+            {
+                "id": str(user.management_org.id),
+                "name": user.management_org.name,
+                "inn": user.management_org.inn
+            }
+            if user.management_org
+            else None
+        )
+    }, status=200)
 
 @csrf_exempt
 @require_POST
@@ -147,13 +182,17 @@ def create_domik_view(request):
     if not request.user.is_jk:
         return JsonResponse({"status": "Только для сотрудников УК"}, status=403)
 
+    management_org = request.user.management_org
+
+    if not management_org:
+        return JsonResponse({"status": "Нет привязки к УК"}, status = 403)
+
     data, error = parse_json(request)
     if error:
         return error
 
     address = (data.get("address") or "").strip()
     fias_id = (data.get("fias_id") or "").strip()
-    management_org = (data.get("management_org") or "").strip()
     apartments = data.get("apartments") or {}
 
     if not address:
@@ -210,6 +249,10 @@ def create_domik_view(request):
         "status": "ok",
         "domik_id": str(domik.id),
         "address": domik.address,
+        "management_org": {
+            "id": str(management_org.id),
+            "name": management_org.name,
+        },
         "apartments_created": len(apartments_to_create),
     }, status=201)
 
