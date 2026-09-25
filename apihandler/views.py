@@ -8,11 +8,23 @@ from apihandler.serializers.appeal import AppealCreateSerializer, AppealListSeri
 from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment, ManagementOrganization
 import uuid as uuid_lib
 from django.db import transaction
-
+from functools import wraps
 from apihandler.models import Domik, Apartment, JKDomik
 
 
+def uk_required(view):
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse({"status": "Не авторизован"}, status=401)
+        if not request.user.is_jk:
+            return JsonResponse({"status": "Только для сотрудников УК"}, status=403)
+        return view(request, *args, **kwargs)
+    return wrapper
+
+
 MAX_APARTMENTS_PER_HOUSE = 1000
+
 
 def parse_json(request):
     try:
@@ -56,7 +68,7 @@ def login_view(request):
         if not org_name or not org_inn:
             return JsonResponse({"status": "Для management_org нужны поля name и inn"}, status=400)
 
-        management_org, created = ManagementOrganization.objects.get_or_create(inn=org_inn, defaults = {"name": org_name})
+        management_org, created = ManagementOrganization.objects.get_or_create(inn=org_inn, defaults={"name": org_name})
 
         try:
             user = User.objects.create_jkuser(max_id=max_id, name=name, management_org=management_org)
@@ -85,36 +97,6 @@ def login_view(request):
         )
     }, status=200)
 
-@csrf_exempt
-@require_POST
-@login_required
-def create_apartment_view(request):
-    data, error = parse_json(request)
-    if error:
-        return error
-
-    domik_id = data.get("domik_id")
-    number = data.get("number")
-
-    if not domik_id or not number:
-        return JsonResponse({"status": "Поля domik_id и number обязательны"}, status=400)
-
-    apartment = Apartment.objects.filter(domik_id=domik_id, number=number).first()
-
-    if apartment is None:
-        return JsonResponse({"status": "Квартира не найдена"}, status=404)
-
-    user_apartment, created = UserApartment.objects.get_or_create(user=request.user, apartment=apartment, defaults={"role": UserApartment.Role.RESIDENT})
-
-    if not created:
-        return JsonResponse({"status": "Квартира уже добавлена"}, status=409)
-
-    return JsonResponse({
-        "id": str(apartment.id),
-        "number": apartment.number,
-        "domik_id": str(apartment.domik_id),
-        "role": user_apartment.role
-    }, status=201)
 
 @csrf_exempt
 @login_required
@@ -129,6 +111,7 @@ def appeals_view(request):
         {"status": "Method not allowed"},
         status=405,
     )
+
 
 def create_appeal(request):
     data, error = parse_json(request)
@@ -176,16 +159,182 @@ def get_appeals(request):
 
 
 @csrf_exempt
-@require_POST
 @login_required
-def create_domik_view(request):
-    if not request.user.is_jk:
-        return JsonResponse({"status": "Только для сотрудников УК"}, status=403)
+def me_view(request):
+    user = request.user
+    user_apartments = user.user_apartments.select_related("apartment__domik")
 
+    return JsonResponse({
+        "id": str(user.id),
+        "max_id": user.max_id,
+        "name": user.name,
+        "last_name": user.last_name,
+        "is_jk": user.is_jk,
+        "apartments": [
+            {
+                "id": str(ua.apartment.id),
+                "number": ua.apartment.number,
+                "entrance": ua.apartment.entrance,
+                "domik_id": str(ua.apartment.domik.id),
+                "domik_address": ua.apartment.domik.address,
+                "management_org": ua.apartment.domik.management_org,
+                "role": ua.role,
+                "role_display": ua.get_role_display(),
+                "is_primary": ua.is_primary,
+            }
+            for ua in user_apartments
+        ],
+    })
+
+
+@csrf_exempt
+@login_required
+def apartments_view(request):
+    if request.method == "GET":
+        return list_user_apartments(request)
+    if request.method == "POST":
+        return create_apartment(request)
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+def list_user_apartments(request):
+    user_apartments = request.user.user_apartments.select_related("apartment__domik")
+
+    return JsonResponse({
+        "apartments": [
+            {
+                "id": str(ua.apartment.id),
+                "number": ua.apartment.number,
+                "entrance": ua.apartment.entrance,
+                "domik_id": str(ua.apartment.domik.id),
+                "domik_address": ua.apartment.domik.address,
+                "management_org": ua.apartment.domik.management_org,
+                "role": ua.role,
+                "role_display": ua.get_role_display(),
+                "is_primary": ua.is_primary,
+            }
+            for ua in user_apartments
+        ],
+    }, status=200)
+
+
+def create_apartment(request):
+    data, error = parse_json(request)
+    if error:
+        return error
+
+    domik_id = data.get("domik_id")
+    number = data.get("number")
+
+    if not domik_id or not number:
+        return JsonResponse({"status": "Поля domik_id и number обязательны"}, status=400)
+
+    apartment = Apartment.objects.filter(domik_id=domik_id, number=number).first()
+
+    if apartment is None:
+        return JsonResponse({"status": "Квартира не найдена"}, status=404)
+
+    is_first = not UserApartment.objects.filter(user=request.user).exists()
+
+    user_apartment, created = UserApartment.objects.get_or_create(
+        user=request.user,
+        apartment=apartment,
+        defaults={
+            "role": UserApartment.Role.RESIDENT,
+            "is_primary": is_first,
+        },
+    )
+
+    if not created:
+        return JsonResponse({"status": "Квартира уже добавлена"}, status=409)
+
+    return JsonResponse({
+        "id": str(apartment.id),
+        "number": apartment.number,
+        "domik_id": str(apartment.domik_id),
+        "role": user_apartment.role,
+        "is_primary": user_apartment.is_primary,
+    }, status=201)
+
+
+@csrf_exempt
+@login_required
+def appeal_detail_view(request, appeal_id):
+    appeal = Appeal.objects.filter(
+        id=appeal_id,
+        author=request.user,
+    ).select_related("domik", "apartment").first()
+
+    if appeal is None:
+        return JsonResponse({"status": "Обращение не найдено"}, status=404)
+
+    history = appeal.appeal_history.select_related("changed_by").all()
+
+    return JsonResponse({
+        "id": str(appeal.id),
+        "title": appeal.title,
+        "description": appeal.description,
+        "status": appeal.status,
+        "status_display": appeal.get_status_display(),
+        "domik": {
+            "id": str(appeal.domik.id),
+            "address": appeal.domik.address,
+            "management_org": appeal.domik.management_org,
+        },
+        "apartment": {
+            "id": str(appeal.apartment.id),
+            "number": appeal.apartment.number,
+        } if appeal.apartment else None,
+        "created_at": appeal.created_at,
+        "updated_at": appeal.updated_at,
+        "history": [
+            {
+                "status": h.status,
+                "status_display": h.get_status_display(),
+                "text": h.text,
+                "changed_by": h.changed_by.name if h.changed_by else None,
+                "changed_at": h.changed_at,
+            }
+            for h in history
+        ],
+    })
+
+
+@csrf_exempt
+@uk_required
+def uk_domiks_view(request):
+    if request.method == "GET":
+        return list_uk_domiks(request)
+    if request.method == "POST":
+        return create_domik(request)
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+def list_uk_domiks(request):
+    domiks = Domik.objects.filter(jk_users__user=request.user).order_by("address")
+
+    return JsonResponse({
+        "domiks": [
+            {
+                "id": str(d.id),
+                "address": d.address,
+                "fias_id": d.fias_id,
+                "management_org": d.management_org,
+                "apartments_count": d.apartments.count(),
+                "appeals_count": d.appeals.count(),
+                "new_appeals_count": d.appeals.filter(status=Appeal.Status.NEW).count(),
+                "created_at": d.created_at,
+            }
+            for d in domiks
+        ],
+    }, status=200)
+
+
+def create_domik(request):
     management_org = request.user.management_org
 
     if not management_org:
-        return JsonResponse({"status": "Нет привязки к УК"}, status = 403)
+        return JsonResponse({"status": "Нет привязки к УК"}, status=403)
 
     data, error = parse_json(request)
     if error:
@@ -236,7 +385,6 @@ def create_domik_view(request):
             fias_id=fias_id,
             management_org=management_org,
         )
-
         JKDomik.objects.create(user=request.user, domik=domik)
 
         apartments_to_create = [
@@ -256,3 +404,116 @@ def create_domik_view(request):
         "apartments_created": len(apartments_to_create),
     }, status=201)
 
+
+@csrf_exempt
+@uk_required
+def uk_domik_detail_view(request, domik_id):
+    domik = Domik.objects.filter(
+        id=domik_id,
+        jk_users__user=request.user,
+    ).first()
+
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    apartments = domik.apartments.order_by("number")
+
+    return JsonResponse({
+        "id": str(domik.id),
+        "address": domik.address,
+        "fias_id": domik.fias_id,
+        "management_org": domik.management_org,
+        "created_at": domik.created_at,
+        "apartments": [
+            {
+                "id": str(a.id),
+                "number": a.number,
+                "entrance": a.entrance,
+                "residents_count": a.user_apartments.count(),
+            }
+            for a in apartments
+        ],
+    })
+
+
+@csrf_exempt
+@require_POST
+@uk_required
+def uk_update_appeal_status_view(request, appeal_id):
+    appeal = Appeal.objects.filter(
+        id=appeal_id,
+        domik__jk_users__user=request.user,
+    ).first()
+
+    if appeal is None:
+        return JsonResponse({"status": "Обращение не найдено"}, status=404)
+
+    data, error = parse_json(request)
+    if error:
+        return error
+
+    new_status = data.get("status")
+    text = (data.get("text") or "").strip()
+
+    valid_statuses = dict(Appeal.Status.choices)
+    if new_status not in valid_statuses:
+        return JsonResponse({
+            "status": "Некорректный статус",
+            "allowed": list(valid_statuses.keys()),
+        }, status=400)
+
+    with transaction.atomic():
+        appeal.status = new_status
+        appeal.save(update_fields=["status", "updated_at"])
+
+        AppealHistory.objects.create(
+            appeal=appeal,
+            status=new_status,
+            changed_by=request.user,
+            text=text,
+        )
+
+    return JsonResponse({
+        "status": "ok",
+        "appeal_id": str(appeal.id),
+        "new_status": appeal.status,
+        "status_display": appeal.get_status_display(),
+    })
+
+
+@csrf_exempt
+@uk_required
+def uk_appeals_view(request):
+    status_filter = request.GET.get("status")
+    domik_id = request.GET.get("domik_id")
+
+    qs = Appeal.objects.filter(
+        domik__jk_users__user=request.user,
+    ).select_related("author", "domik", "apartment").order_by("-created_at")
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if domik_id:
+        qs = qs.filter(domik_id=domik_id)
+
+    return JsonResponse({
+        "appeals": [
+            {
+                "id": str(a.id),
+                "title": a.title,
+                "status": a.status,
+                "status_display": a.get_status_display(),
+                "author": {
+                    "id": str(a.author.id),
+                    "name": a.author.name,
+                    "last_name": a.author.last_name,
+                },
+                "domik_id": str(a.domik.id),
+                "domik_address": a.domik.address,
+                "apartment_number": a.apartment.number if a.apartment else None,
+                "created_at": a.created_at,
+                "updated_at": a.updated_at,
+            }
+            for a in qs
+        ],
+    })
