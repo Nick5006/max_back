@@ -16,14 +16,18 @@ from apihandler.models import (
     Choice,
     Vote,
     Notification,
+    CapitalRepairWork,
+    CapitalRepair,
 )
 from django.db import transaction
 from functools import wraps
 
 from apihandler.serializers.notification import NotificationSerializer
 from apihandler.serializers.poll import get_user_domik_ids, serialize_poll_choice, serialize_poll
+from apihandler.serializers.capital_repair import serialize_capital_repair_work, serialize_capital_repair
 from django.db.models import Count, Prefetch, Q
 from django.db import IntegrityError
+from decimal import Decimal, InvalidOperation
 
 
 def api_login_required(view):
@@ -1318,6 +1322,283 @@ def uk_apartment_detail_view(request, domik_id, apartment_id):
             )
 
         apartment.delete()
+        return JsonResponse({"status": "ok"}, status=200)
+
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+@csrf_exempt
+@api_login_required
+@require_GET
+def user_capital_repair_view(request, domik_id):
+    has_access = UserApartment.objects.filter(
+        user=request.user, apartment__domik_id=domik_id
+    ).exists()
+    if not has_access:
+        return JsonResponse({"status": "Нет доступа к этому дому"}, status=403)
+
+    domik = Domik.objects.filter(id=domik_id).first()
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден"}, status=404)
+
+    cr = CapitalRepair.objects.filter(domik=domik).first()
+
+    if cr is None:
+        return JsonResponse({
+            "domik": {"id": str(domik.id), "address": domik.address},
+            "capital_repair": None,
+            "works": [],
+            "status": "Раздел капремонта для дома ещё не заполнен",
+        }, status=200)
+
+    return JsonResponse({
+        "domik": {"id": str(domik.id), "address": domik.address},
+        "capital_repair": serialize_capital_repair(cr),
+        "works": [serialize_capital_repair_work(w) for w in cr.works.all()],
+    }, status=200)
+
+@csrf_exempt
+@uk_required
+def uk_capital_repair_view(request, domik_id):
+    domik = Domik.objects.filter(
+        id=domik_id, management_org=request.user.management_org
+    ).first()
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    cr = CapitalRepair.objects.filter(domik=domik).first()
+
+    if request.method == "GET":
+        return JsonResponse({
+            "domik": {"id": str(domik.id), "address": domik.address},
+            "capital_repair": serialize_capital_repair(cr),
+            "works": [serialize_capital_repair_work(w) for w in cr.works.all()] if cr else [],
+        }, status=200)
+
+    if request.method == "POST":
+        if cr is not None:
+            return JsonResponse(
+                {"status": "Счёт капремонта для дома уже заведён"}, status=409
+            )
+
+        data, error = parse_json(request)
+        if error:
+            return error
+
+        try:
+            tariff = Decimal(str(data.get("tariff_per_sqm", "0")))
+        except (InvalidOperation, TypeError, ValueError):
+            return JsonResponse(
+                {"status": "tariff_per_sqm должен быть числом"}, status=400
+            )
+        if tariff < 0:
+            return JsonResponse({"status": "Тариф не может быть отрицательным"}, status=400)
+
+        cr = CapitalRepair.objects.create(domik=domik, tariff_per_sqm=tariff)
+        return JsonResponse({
+            "status": "ok",
+            "capital_repair": serialize_capital_repair(cr),
+        }, status=201)
+
+    if request.method == "PATCH":
+        if cr is None:
+            return JsonResponse({"status": "Счёт капремонта для дома не заведён"}, status=404)
+
+        data, error = parse_json(request)
+        if error:
+            return error
+
+        updated = []
+
+        for field in ("tariff_per_sqm", "collected_total", "spent_total"):
+            if field in data:
+                try:
+                    value = Decimal(str(data[field]))
+                except (InvalidOperation, TypeError, ValueError):
+                    return JsonResponse(
+                        {"status": f"{field} должен быть числом"}, status=400
+                    )
+                if value < 0:
+                    return JsonResponse(
+                        {"status": f"{field} не может быть отрицательным"}, status=400
+                    )
+                if value != getattr(cr, field):
+                    setattr(cr, field, value)
+                    updated.append(field)
+
+        if not updated:
+            return JsonResponse({"status": "Нечего обновлять"}, status=400)
+
+        cr.save(update_fields=updated + ["updated_at"])
+        return JsonResponse({
+            "status": "ok",
+            "capital_repair": serialize_capital_repair(cr),
+            "updated_fields": updated,
+        }, status=200)
+
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+@uk_required
+def uk_capital_repair_works_view(request, domik_id):
+    domik = Domik.objects.filter(
+        id=domik_id, management_org=request.user.management_org
+    ).first()
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    cr = CapitalRepair.objects.filter(domik=domik).first()
+    if cr is None:
+        return JsonResponse(
+            {"status": "Сначала заведите счёт капремонта для дома"}, status=404
+        )
+
+    if request.method == "GET":
+        return JsonResponse({
+            "works": [serialize_capital_repair_work(w) for w in cr.works.all()],
+        }, status=200)
+
+    if request.method == "POST":
+        data, error = parse_json(request)
+        if error:
+            return error
+
+        work_type = (data.get("work_type") or "").strip()
+        planned_year = data.get("planned_year")
+        status_value = data.get("status") or CapitalRepairWork.Status.PLANNED
+        cost = data.get("cost")
+        contractor = (data.get("contractor") or "").strip()
+        description = (data.get("description") or "").strip()
+        completed_at = data.get("completed_at")
+
+        if not work_type:
+            return JsonResponse({"status": "Поле work_type обязательно"}, status=400)
+        if not planned_year:
+            return JsonResponse({"status": "Поле planned_year обязательно"}, status=400)
+
+        try:
+            planned_year = int(planned_year)
+        except (TypeError, ValueError):
+            return JsonResponse({"status": "planned_year должен быть числом"}, status=400)
+
+        if planned_year < 1900 or planned_year > 2200:
+            return JsonResponse({"status": "planned_year вне разумных границ"}, status=400)
+
+        if status_value not in dict(CapitalRepairWork.Status.choices):
+            return JsonResponse({
+                "status": "Некорректный status",
+                "allowed": list(dict(CapitalRepairWork.Status.choices).keys()),
+            }, status=400)
+
+        cost_decimal = None
+        if cost is not None and cost != "":
+            try:
+                cost_decimal = Decimal(str(cost))
+            except (InvalidOperation, TypeError, ValueError):
+                return JsonResponse({"status": "cost должен быть числом"}, status=400)
+            if cost_decimal < 0:
+                return JsonResponse({"status": "cost не может быть отрицательным"}, status=400)
+
+        work = CapitalRepairWork.objects.create(
+            capital_repair=cr,
+            work_type=work_type,
+            planned_year=planned_year,
+            status=status_value,
+            cost=cost_decimal,
+            contractor=contractor,
+            description=description,
+            completed_at=completed_at,
+        )
+
+        return JsonResponse({
+            "status": "ok",
+            "work": serialize_capital_repair_work(work),
+        }, status=201)
+
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+@uk_required
+def uk_capital_repair_work_detail_view(request, domik_id, work_id):
+    domik = Domik.objects.filter(
+        id=domik_id, management_org=request.user.management_org
+    ).first()
+
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    work = CapitalRepairWork.objects.filter(
+        id=work_id, capital_repair__domik=domik
+    ).first()
+    if work is None:
+        return JsonResponse({"status": "Работа не найдена"}, status=404)
+
+    if request.method == "PATCH":
+        data, error = parse_json(request)
+        if error:
+            return error
+
+        updated = []
+
+        if "work_type" in data:
+            v = (data.get("work_type") or "").strip()
+            if not v:
+                return JsonResponse({"status": "work_type не может быть пустым"}, status=400)
+            work.work_type = v
+            updated.append("work_type")
+
+        if "planned_year" in data:
+            try:
+                v = int(data["planned_year"])
+            except (TypeError, ValueError):
+                return JsonResponse({"status": "planned_year должен быть числом"}, status=400)
+            work.planned_year = v
+            updated.append("planned_year")
+
+        if "status" in data:
+            if data["status"] not in dict(CapitalRepairWork.Status.choices):
+                return JsonResponse({"status": "Некорректный status"}, status=400)
+            work.status = data["status"]
+            updated.append("status")
+
+        if "cost" in data:
+            if data["cost"] is None or data["cost"] == "":
+                work.cost = None
+            else:
+                try:
+                    c = Decimal(str(data["cost"]))
+                except (InvalidOperation, TypeError, ValueError):
+                    return JsonResponse({"status": "cost должен быть числом"}, status=400)
+                if c < 0:
+                    return JsonResponse({"status": "cost не может быть отрицательным"}, status=400)
+                work.cost = c
+            updated.append("cost")
+
+        if "contractor" in data:
+            work.contractor = (data.get("contractor") or "").strip()
+            updated.append("contractor")
+
+        if "description" in data:
+            work.description = (data.get("description") or "").strip()
+            updated.append("description")
+
+        if "completed_at" in data:
+            work.completed_at = data["completed_at"] or None
+            updated.append("completed_at")
+
+        if not updated:
+            return JsonResponse({"status": "Нечего обновлять"}, status=400)
+
+        work.save(update_fields=updated)
+        return JsonResponse({
+            "status": "ok",
+            "work": serialize_capital_repair_work(work),
+            "updated_fields": updated,
+        }, status=200)
+
+    if request.method == "DELETE":
+        work.delete()
         return JsonResponse({"status": "ok"}, status=200)
 
     return JsonResponse({"status": "Method not allowed"}, status=405)

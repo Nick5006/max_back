@@ -218,3 +218,57 @@ class Notification(models.Model):
     def __str(self):
         return self.title
 
+class CapitalRepair(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    domik = models.OneToOneField(
+        Domik, on_delete=models.CASCADE, related_name="capital_repair"
+    )
+    tariff_per_sqm = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0,
+        help_text="Руб. за м² в месяц (справочно, устанавливается регионом)",
+    )
+    collected_total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0,
+        help_text="Собрано всего, руб. (УК обновляет вручную)",
+    )
+    spent_total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0,
+        help_text="Потрачено всего, руб. (УК обновляет вручную)",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def balance(self):
+        return self.collected_total - self.spent_total
+
+    def __str__(self):
+        return f"Капремонт — {self.domik.address}"
+
+
+class CapitalRepairWork(models.Model):
+    class Status(models.TextChoices):
+        PLANNED = "planned", "Запланировано"
+        IN_PROGRESS = "in_progress", "В работе"
+        DONE = "done", "Выполнено"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    capital_repair = models.ForeignKey(
+        CapitalRepair, on_delete=models.CASCADE, related_name="works"
+    )
+    work_type = models.CharField(max_length=255)
+    planned_year = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PLANNED
+    )
+    cost = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    contractor = models.CharField(max_length=255, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    completed_at = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["planned_year", "work_type"]
+
+    def __str__(self):
+        return f"{self.work_type} ({self.planned_year})"

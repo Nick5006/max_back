@@ -15,6 +15,8 @@ from .models import (
     Poll,
     Choice,
     Vote,
+    CapitalRepair,
+    CapitalRepairWork,
 )
 
 admin.site.site_header = "Панель управления API"
@@ -490,6 +492,73 @@ class AppealHistoryAdmin(admin.ModelAdmin):
             obj.get_status_display(),
             APPEAL_STATUS_COLORS.get(obj.status, "#64748b"),
         )
+
+class CapitalRepairWorkInline(admin.TabularInline):
+    model = CapitalRepairWork
+    extra = 0
+    fields = ("work_type", "planned_year", "status", "cost", "contractor")
+    verbose_name = "Работа"
+    verbose_name_plural = "Программа работ"
+    classes = ("collapse",)
+
+
+@admin.register(CapitalRepair)
+class CapitalRepairAdmin(admin.ModelAdmin):
+    list_display = (
+        "domik", "tariff_per_sqm",
+        "collected_total", "spent_total", "balance_badge", "updated_at",
+    )
+    search_fields = ("domik__address",)
+    autocomplete_fields = ("domik",)
+    readonly_fields = ("id", "updated_at", "created_at", "balance_badge")
+    ordering = ("domik__address",)
+    list_per_page = 50
+    inlines = [CapitalRepairWorkInline]
+
+    fieldsets = (
+        ("Дом", {"fields": ("id", "domik")}),
+        ("Показатели", {
+            "fields": (
+                "tariff_per_sqm",
+                "collected_total", "spent_total", "balance_badge",
+            ),
+        }),
+        ("Даты", {"fields": ("created_at", "updated_at")}),
+    )
+
+    @admin.display(description="Остаток")
+    def balance_badge(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        return badge(f"{obj.balance:,.2f} ₽", "#16a34a")
+
+
+@admin.register(CapitalRepairWork)
+class CapitalRepairWorkAdmin(admin.ModelAdmin):
+    list_display = (
+        "work_type", "domik_link", "planned_year",
+        "status_badge", "cost", "contractor",
+    )
+    list_filter = ("status", "planned_year", "capital_repair__domik")
+    search_fields = ("work_type", "contractor", "capital_repair__domik__address")
+    autocomplete_fields = ("capital_repair",)
+    ordering = ("planned_year", "work_type")
+    list_per_page = 50
+
+    @admin.display(description="Дом", ordering="capital_repair__domik__address")
+    def domik_link(self, obj):
+        url = reverse("admin:apihandler_domik_change", args=[obj.capital_repair.domik.id])
+        return format_html('<a href="{}">{}</a>', url, obj.capital_repair.domik.address)
+
+    @admin.display(description="Статус", ordering="status")
+    def status_badge(self, obj):
+        colors = {
+            "planned": "#2563eb",
+            "in_progress": "#d97706",
+            "done": "#16a34a",
+        }
+        return badge(obj.get_status_display(), colors.get(obj.status, "#64748b"))
+
 
 admin.site.register(Poll, PollAdmin)
 admin.site.register(Vote, VoteAdmin)
