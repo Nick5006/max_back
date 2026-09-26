@@ -15,9 +15,12 @@ from apihandler.models import (
     Poll,
     Choice,
     Vote,
+    Notification,
 )
 from django.db import transaction
 from functools import wraps
+
+from apihandler.serializers.notification import NotificationSerializer
 from apihandler.serializers.poll import get_user_domik_ids, serialize_poll_choice, serialize_poll
 from django.db.models import Count, Prefetch, Q
 from django.db import IntegrityError
@@ -918,6 +921,142 @@ def uk_polls_view(request):
         return create_poll(request)
 
     return JsonResponse({"status": "Method not allowed"}, status=405)
+
+@csrf_exempt
+@uk_required
+def uk_notifications_view(request):
+    if request.method == "GET":
+        return uk_get_notifications(request)
+
+    elif request.method == "POST":
+        return uk_create_notification(request)
+
+    else:
+        return JsonResponse({"status": "Method not allowed"}, status=405)
+
+def uk_create_notification(request):
+    data, error = parse_json(request)
+
+    if error:
+        return JsonResponse({"status": error}, status=400)
+
+    serializer = NotificationSerializer(data=data)
+
+    if not serializer.is_valid():
+        return JsonResponse({"status": serializer.errors}, status=400)
+
+    data = serializer.data
+    domik = Domik.objects.filter(id=data["domik_id"], management_org=request.user.management_org).first()
+
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден"}, status=404)
+
+    notification = Notification.objects.create(
+        domik=domik,
+        created_by=request.user,
+        title=data["title"],
+        text=data["text"],
+    )
+
+    return JsonResponse({
+        "status": "ok",
+        "notification": {
+            "id": str(notification.id),
+            "title": notification.title,
+            "text": notification.text,
+            "created_at": notification.created_at,
+            "domik": {
+                "id": str(domik.id),
+                "address": domik.address,
+            },
+        },
+    }, status=201)
+
+def uk_get_notifications(request):
+    notifications = (
+        Notification.objects
+        .filter(
+            domik__management_org=request.user.management_org
+        )
+        .select_related(
+            "domik",
+            "created_by",
+        )
+        .order_by("-created_at")
+    )
+
+    return JsonResponse({
+        "notifications": [
+            {
+                "id": str(notification.id),
+                "title": notification.title,
+                "text": notification.text,
+                "created_at": notification.created_at,
+
+                "domik": {
+                    "id": str(notification.domik.id),
+                    "address": notification.domik.address,
+                },
+
+                "created_by": (
+                    {
+                        "id": str(notification.created_by.id),
+                        "name": notification.created_by.name,
+                    }
+                    if notification.created_by
+                    else None
+                ),
+            }
+            for notification in notifications
+        ],
+    })
+
+@csrf_exempt
+@api_login_required
+@require_GET
+def notifications_view(request):
+    notifications = (
+        Notification.objects
+        .filter(
+            domik__apartments__user_apartments__user=request.user
+        )
+        .select_related(
+            "domik",
+            "domik__management_org",
+            "created_by",
+        )
+        .distinct()
+        .order_by("-created_at")
+    )
+
+    return JsonResponse({
+        "notifications": [
+            {
+                "id": str(notification.id),
+                "title": notification.title,
+                "text": notification.text,
+                "created_at": notification.created_at,
+
+                "domik": {
+                    "id": str(notification.domik.id),
+                    "address": notification.domik.address,
+                },
+
+                "management_org": (
+                    {
+                        "id": str(
+                            notification.domik.management_org.id
+                        ),
+                        "name":
+                            notification.domik.management_org.name,
+                    }
+                    if notification.domik.management_org
+                    else None
+                ),
+            }
+            for notification in notifications
+        ],
+    }, status=200)
 
 @csrf_exempt
 @uk_required

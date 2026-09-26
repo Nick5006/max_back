@@ -204,3 +204,17 @@ class Vote(models.Model):
             )
         ]
 
+class Notification(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    domik = models.ForeignKey(Domik, on_delete=models.CASCADE, related_name="notifications")
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, null=True, related_name="notifications")
+    title = models.CharField(max_length = 200)
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str(self):
+        return self.title
+
