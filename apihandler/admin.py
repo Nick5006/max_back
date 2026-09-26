@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.html import format_html
 from django.urls import reverse
+from django.db.models import Count
 
 from .models import (
     User,
@@ -11,6 +12,9 @@ from .models import (
     ManagementOrganization,
     Appeal,
     AppealHistory,
+    Poll,
+    Choice,
+    Vote,
 )
 
 admin.site.site_header = "Панель управления API"
@@ -133,6 +137,122 @@ class UKStaffInline(admin.TabularInline):
     classes = ("collapse",)
 
 
+class ChoiceInline(admin.TabularInline):
+    model = Choice
+    extra = 0
+    fields = ("order", "text", "votes_count_display")
+    readonly_fields = ("votes_count_display",)
+    verbose_name = "Вариант ответа"
+    verbose_name_plural = "Варианты ответа"
+    ordering = ("order",)
+
+    @admin.display(description="Голосов")
+    def votes_count_display(self, obj):
+        if obj.pk is None:
+            return "—"
+        return badge(str(obj.votes.count()), "#0ea5e9")
+
+
+class PollAdmin(admin.ModelAdmin):
+    list_display = (
+        "title", "author_link", "domik_link",
+        "is_active_badge", "choices_count", "votes_count",
+        "created_at",
+    )
+    list_display_links = ("title",)
+    list_filter = ("is_active", "created_at", "domik__management_org")
+    search_fields = (
+        "title", "description",
+        "author__max_id", "author__name",
+        "domik__address",
+    )
+    autocomplete_fields = ("author", "domik")
+    ordering = ("-created_at",)
+    readonly_fields = ("id", "created_at", "votes_count", "choices_count")
+    inlines = [ChoiceInline]
+    list_per_page = 30
+    date_hierarchy = "created_at"
+
+    fieldsets = (
+        ("Опрос", {
+            "fields": ("id", "title", "description", "is_active"),
+        }),
+        ("Привязка", {
+            "fields": ("author", "domik"),
+        }),
+        ("Статистика", {
+            "fields": ("choices_count", "votes_count"),
+        }),
+        ("Даты", {
+            "fields": ("created_at",),
+        }),
+    )
+
+    def get_queryset(self, request):
+        return (
+            super().get_queryset(request)
+            .select_related("author", "domik", "domik__management_org")
+            .annotate(_choices_count=Count("choices", distinct=True))
+            .annotate(_votes_count=Count("votes", distinct=True))
+        )
+
+    @admin.display(description="Автор", ordering="author__name")
+    def author_link(self, obj):
+        url = reverse("admin:apihandler_user_change", args=[obj.author.id])
+        return format_html(
+            '<a href="{}">{} {}</a>', url, obj.author.name, obj.author.last_name
+        )
+
+    @admin.display(description="Дом", ordering="domik__address")
+    def domik_link(self, obj):
+        url = reverse("admin:apihandler_domik_change", args=[obj.domik.id])
+        return format_html('<a href="{}">{}</a>', url, obj.domik.address)
+
+    @admin.display(description="Активен", boolean=True, ordering="is_active")
+    def is_active_badge(self, obj):
+        return obj.is_active
+
+    @admin.display(description="Вариантов", ordering="_choices_count")
+    def choices_count(self, obj):
+        return badge(str(obj._choices_count), "#0ea5e9")
+
+    @admin.display(description="Голосов", ordering="_votes_count")
+    def votes_count(self, obj):
+        return badge(str(obj._votes_count), "#7c3aed")
+
+
+class VoteAdmin(admin.ModelAdmin):
+    list_display = ("poll_link", "choice", "user_link", "created_at")
+    list_filter = ("created_at", "poll")
+    search_fields = (
+        "poll__title",
+        "choice__text",
+        "user__max_id", "user__name",
+    )
+    autocomplete_fields = ("poll", "user")   # ← убрали "choice"
+    ordering = ("-created_at",)
+    readonly_fields = ("id", "created_at")
+    list_per_page = 50
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Опрос", ordering="poll__title")
+    def poll_link(self, obj):
+        url = reverse("admin:apihandler_poll_change", args=[obj.poll.id])
+        return format_html('<a href="{}">{}</a>', url, obj.poll.title)
+
+    @admin.display(description="Пользователь", ordering="user__name")
+    def user_link(self, obj):
+        url = reverse("admin:apihandler_user_change", args=[obj.user.id])
+        return format_html(
+            '<a href="{}">{} {}</a>', url, obj.user.name, obj.user.last_name
+        )
+
 @admin.register(ManagementOrganization)
 class ManagementOrganizationAdmin(admin.ModelAdmin):
     list_display = ("name", "inn", "domiks_count", "staff_count", "created_at")
@@ -218,7 +338,7 @@ class UserAdmin(BaseUserAdmin):
 class DomikAdmin(admin.ModelAdmin):
     list_display = (
         "address", "management_org", "fias_id",
-        "apartments_count", "appeals_count", "created_at",
+        "apartments_count", "appeals_count", "polls_count", "created_at",
     )
     search_fields = ("address", "fias_id", "management_org__name")
     ordering = ("address",)
@@ -235,6 +355,10 @@ class DomikAdmin(admin.ModelAdmin):
     @admin.display(description="Обращений")
     def appeals_count(self, obj):
         return badge(str(obj.appeals.count()), "#d97706")
+
+    @admin.display(description="Опросов")
+    def polls_count(self, obj):
+        return badge(str(obj.polls.count()), "#7c3aed")
 
 
 @admin.register(Apartment)
@@ -366,3 +490,6 @@ class AppealHistoryAdmin(admin.ModelAdmin):
             obj.get_status_display(),
             APPEAL_STATUS_COLORS.get(obj.status, "#64748b"),
         )
+
+admin.site.register(Poll, PollAdmin)
+admin.site.register(Vote, VoteAdmin)
