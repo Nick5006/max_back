@@ -13,9 +13,15 @@ from apihandler.models import (
     UserApartment,
     ManagementOrganization,
     Domik,
+    Poll,
+    Choice,
+    Vote,
 )
 from django.db import transaction
 from functools import wraps
+from apihandler.serializers.poll import get_user_domik_ids, serialize_poll_choice, serialize_poll
+from django.db.models import Count, Prefetch
+
 
 
 def uk_required(view):
@@ -604,3 +610,292 @@ def uk_appeals_view(request):
             for a in qs
         ],
     })
+
+
+@csrf_exempt
+@login_required
+def polls_view(request):
+    if request.method == "GET":
+        return list_polls(request)
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+def list_polls(request):
+    domik_ids = get_user_domik_ids(request.user)
+
+    polls = (
+        Poll.objects
+        .filter(domik_id__in=domik_ids)
+        .select_related("author", "domik")
+        .prefetch_related(
+            Prefetch(
+                "choices",
+                queryset=Choice.objects.annotate(votes_count=Count("votes")),
+            )
+        )
+        .annotate(total_votes=Count("votes"))
+    )
+
+    domik_id = request.GET.get("domik_id")
+    if domik_id:
+        polls = polls.filter(domik_id=domik_id)
+
+    only_active = request.GET.get("active")
+    if only_active == "1":
+        polls = polls.filter(is_active=True)
+
+    return JsonResponse({
+        "polls": [serialize_poll(p, request) for p in polls],
+    }, status=200)
+
+@csrf_exempt
+@login_required
+def poll_detail_view(request, poll_id):
+    domik_ids = get_user_domik_ids(request.user)
+
+    poll = (
+        Poll.objects
+        .filter(id=poll_id, domik_id__in=domik_ids)
+        .select_related("author", "domik")
+        .prefetch_related(
+            Prefetch(
+                "choices",
+                queryset=Choice.objects.annotate(votes_count=Count("votes")),
+            )
+        )
+        .first()
+    )
+
+    if poll is None:
+        return JsonResponse({"status": "Опрос не найден"}, status=404)
+
+    return JsonResponse(serialize_poll(poll, request), status=200)
+
+
+@csrf_exempt
+@require_POST
+@login_required
+def poll_vote_view(request, poll_id):
+    domik_ids = get_user_domik_ids(request.user)
+
+    poll = Poll.objects.filter(
+        id=poll_id, domik_id__in=domik_ids
+    ).first()
+
+    if poll is None:
+        return JsonResponse({"status": "Опрос не найден"}, status=404)
+
+    if not poll.is_active:
+        return JsonResponse({"status": "Опрос закрыт"}, status=400)
+
+    data, error = parse_json(request)
+    if error:
+        return error
+
+    choice_id = data.get("choice_id")
+    if not choice_id:
+        return JsonResponse({"status": "Поле choice_id обязательно"}, status=400)
+
+    choice = Choice.objects.filter(id=choice_id, poll=poll).first()
+    if choice is None:
+        return JsonResponse(
+            {"status": "Вариант не найден в этом опросе"}, status=404
+        )
+
+    vote, created = Vote.objects.update_or_create(
+        poll=poll,
+        user=request.user,
+        defaults={"choice": choice},
+    )
+
+    total_votes = poll.votes.count()
+
+    return JsonResponse({
+        "status": "ok",
+        "created": created,
+        "poll_id": str(poll.id),
+        "choice_id": str(choice.id),
+        "total_votes": total_votes,
+    }, status=201 if created else 200)
+
+@csrf_exempt
+@login_required
+def poll_results_view(request, poll_id):
+    domik_ids = get_user_domik_ids(request.user)
+
+    poll = (
+        Poll.objects
+        .filter(id=poll_id, domik_id__in=domik_ids)
+        .select_related("author", "domik")
+        .first()
+    )
+    if poll is None:
+        return JsonResponse({"status": "Опрос не найден"}, status=404)
+
+    choices = (
+        poll.choices
+        .annotate(votes_count=Count("votes"))
+        .order_by("-votes_count", "order")
+    )
+    total = sum(c.votes_count for c in choices)
+
+    results = []
+    for c in choices:
+        percent = round(c.votes_count * 100 / total, 1) if total else 0.0
+        results.append({
+            "id": str(c.id),
+            "text": c.text,
+            "votes_count": c.votes_count,
+            "percent": percent,
+        })
+
+    return JsonResponse({
+        "poll_id": str(poll.id),
+        "title": poll.title,
+        "total_votes": total,
+        "results": results,
+    }, status=200)
+
+def create_poll(request):
+    data, error = parse_json(request)
+    if error:
+        return error
+
+    domik_id = data.get("domik_id")
+    title = (data.get("title") or "").strip()
+    description = (data.get("description") or "").strip()
+    choices_data = data.get("choices") or []
+
+    if not domik_id:
+        return JsonResponse({"status": "Поле domik_id обязательно"}, status=400)
+    if not title:
+        return JsonResponse({"status": "Поле title обязательно"}, status=400)
+    if not isinstance(choices_data, list) or len(choices_data) < 2:
+        return JsonResponse(
+            {"status": "Нужно минимум 2 варианта ответа"}, status=400
+        )
+
+    domik = Domik.objects.filter(
+        id=domik_id,
+        management_org=request.user.management_org,
+    ).first()
+    if domik is None:
+        return JsonResponse(
+            {"status": "Дом не найден или нет доступа"}, status=404
+        )
+
+    texts = []
+    for c in choices_data:
+        if isinstance(c, dict):
+            t = (c.get("text") or "").strip()
+        else:
+            t = (c or "").strip()
+        if t:
+            texts.append(t)
+
+    if len(texts) < 2:
+        return JsonResponse(
+            {"status": "Нужно минимум 2 непустых варианта"}, status=400
+        )
+
+    if len(set(texts)) != len(texts):
+        return JsonResponse(
+            {"status": "Варианты не должны повторяться"}, status=400
+        )
+
+    with transaction.atomic():
+        poll = Poll.objects.create(
+            author=request.user,
+            domik=domik,
+            title=title,
+            description=description,
+        )
+        Choice.objects.bulk_create([
+            Choice(poll=poll, text=t, order=i) for i, t in enumerate(texts)
+        ])
+
+    poll = (
+        Poll.objects
+        .select_related("author", "domik")
+        .prefetch_related("choices")
+        .get(pk=poll.pk)
+    )
+    return JsonResponse(serialize_poll(poll, request), status=201)
+
+
+@csrf_exempt
+@require_POST
+@uk_required
+def uk_poll_close_view(request, poll_id):
+    poll = (
+        Poll.objects
+        .filter(id=poll_id)
+        .select_related("domik")
+        .first()
+    )
+    if poll is None:
+        return JsonResponse({"status": "Опрос не найден"}, status=404)
+
+    if poll.domik.management_org_id != request.user.management_org_id:
+        return JsonResponse({"status": "Нет прав"}, status=403)
+
+    poll.is_active = False
+    poll.save(update_fields=["is_active"])
+
+    return JsonResponse({
+        "status": "ok",
+        "poll_id": str(poll.id),
+        "is_active": poll.is_active,
+    }, status=200)
+
+
+@csrf_exempt
+@uk_required
+def uk_poll_delete_view(request, poll_id):
+    if request.method != "DELETE":
+        return JsonResponse({"status": "Method not allowed"}, status=405)
+
+    poll = (
+        Poll.objects
+        .filter(id=poll_id)
+        .select_related("domik")
+        .first()
+    )
+    if poll is None:
+        return JsonResponse({"status": "Опрос не найден"}, status=404)
+
+    if poll.domik.management_org_id != request.user.management_org_id:
+        return JsonResponse({"status": "Нет прав"}, status=403)
+
+    poll.delete()
+    return JsonResponse({"status": "ok"}, status=200)
+
+@csrf_exempt
+@uk_required
+def uk_polls_view(request):
+    if request.method == "GET":
+        polls = (
+            Poll.objects
+            .filter(domik__management_org=request.user.management_org)
+            .select_related("author", "domik")
+            .prefetch_related(
+                Prefetch(
+                    "choices",
+                    queryset=Choice.objects.annotate(votes_count=Count("votes")),
+                )
+            )
+            .annotate(total_votes=Count("votes"))
+        )
+
+        domik_id = request.GET.get("domik_id")
+        if domik_id:
+            polls = polls.filter(domik_id=domik_id)
+
+        return JsonResponse({
+            "polls": [serialize_poll(p, request) for p in polls],
+        }, status=200)
+
+    if request.method == "POST":
+        return create_poll(request)
+
+    return JsonResponse({"status": "Method not allowed"}, status=405)

@@ -129,7 +129,6 @@ class UserApartment(models.Model):
         return f"{self.user} — {self.apartment} ({self.get_role_display()})"
 
     def save(self, *args, **kwargs):
-        # гарантируем, что у пользователя только одна основная квартира
         if self.is_primary:
             UserApartment.objects.filter(
                 user=self.user, is_primary=True
@@ -168,7 +167,40 @@ class AppealHistory(models.Model):
     class Meta:
         ordering = ["changed_at"]
 
+class Poll(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="polls")
+    domik = models.ForeignKey(Domik, on_delete=models.CASCADE, related_name="polls")
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
+class Choice(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    poll = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name="choices")
+    text = models.CharField(max_length=200)
+    order = models.PositiveIntegerField(default=0)
 
+    class Meta:
+        ordering = ["order"]
+
+
+class Vote(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    poll = models.ForeignKey(Poll, on_delete=models.CASCADE, related_name="votes")
+    choice = models.ForeignKey(Choice, on_delete=models.CASCADE, related_name="votes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="votes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["poll", "user"], name="unique_vote_per_poll"
+            )
+        ]
 
