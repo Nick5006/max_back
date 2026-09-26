@@ -1011,6 +1011,51 @@ def uk_get_notifications(request):
         ],
     })
 
+@require_GET
+@uk_required
+def uk_notification_detail_view(request, notification_id):
+    notification = (
+        Notification.objects
+        .filter(
+            id=notification_id,
+            domik__management_org=request.user.management_org,
+        )
+        .select_related(
+            "domik",
+            "created_by",
+        )
+        .first()
+    )
+
+    if notification is None:
+        return JsonResponse(
+            {
+                "status": "Уведомление не найдено"
+            },
+            status=404,
+        )
+
+    return JsonResponse({
+        "id": str(notification.id),
+        "title": notification.title,
+        "text": notification.text,
+        "created_at": notification.created_at,
+
+        "domik": {
+            "id": str(notification.domik.id),
+            "address": notification.domik.address,
+        },
+
+        "created_by": (
+            {
+                "id": str(notification.created_by.id),
+                "name": notification.created_by.name,
+            }
+            if notification.created_by
+            else None
+        ),
+    }, status=200)
+
 @csrf_exempt
 @api_login_required
 @require_GET
@@ -1056,6 +1101,65 @@ def notifications_view(request):
             }
             for notification in notifications
         ],
+    }, status=200)
+
+@require_GET
+@api_login_required
+def user_notification_detail_view(request, notification_id):
+    notification = (
+        Notification.objects
+        .filter(
+            id=notification_id,
+            domik__apartments__user_apartments__user=request.user,
+        )
+        .select_related(
+            "domik",
+            "domik__management_org",
+            "created_by",
+        )
+        .distinct()
+        .first()
+    )
+
+    if notification is None:
+        return JsonResponse(
+            {
+                "status": "Уведомление не найдено"
+            },
+            status=404,
+        )
+
+    return JsonResponse({
+        "id": str(notification.id),
+        "title": notification.title,
+        "text": notification.text,
+        "created_at": notification.created_at,
+
+        "domik": {
+            "id": str(notification.domik.id),
+            "address": notification.domik.address,
+        },
+
+        "management_org": (
+            {
+                "id": str(
+                    notification.domik.management_org.id
+                ),
+                "name":
+                    notification.domik.management_org.name,
+            }
+            if notification.domik.management_org
+            else None
+        ),
+
+        "created_by": (
+            {
+                "id": str(notification.created_by.id),
+                "name": notification.created_by.name,
+            }
+            if notification.created_by
+            else None
+        ),
     }, status=200)
 
 @csrf_exempt

@@ -25,7 +25,7 @@ from apihandler.views import (
     uk_update_appeal_status_view,
     polls_view, poll_detail_view, poll_vote_view, poll_results_view,
     uk_polls_view, uk_poll_close_view, uk_poll_delete_view,
-    uk_notifications_view, notifications_view,
+    uk_notifications_view, notifications_view, user_notification_detail_view, uk_notification_detail_view,
     uk_apartments_view, uk_apartment_detail_view,
 )
 
@@ -41,7 +41,9 @@ urlpatterns = [
     path('api/v1/user/polls/<uuid:poll_id>/vote', poll_vote_view),
     path('api/v1/user/polls/<uuid:poll_id>/results', poll_results_view),
     path('api/v1/user/notifications', notifications_view),
+    path('api/v1/user/notifications/<uuid:notification_id>', user_notification_detail_view),
     path('api/v1/uk/notifications', uk_notifications_view),
+    path('api/v1/uk/notifications/<uuid:notification_id>', uk_notification_detail_view),
     path('api/v1/uk/domiks', uk_domiks_view),
     path('api/v1/uk/domiks/<uuid:domik_id>', uk_domik_detail_or_delete_view),
     path('api/v1/uk/appeals', uk_appeals_view),
