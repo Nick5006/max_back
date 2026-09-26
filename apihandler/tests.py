@@ -2,8 +2,7 @@ import uuid
 
 from django.test import TestCase
 import json
-from apihandler.models import (User, Domik, Apartment, UserApartment, Appeal, AppealHistory, ManagementOrganization,
-                               JKDomik)
+from apihandler.models import (User, Domik, Apartment, UserApartment, Appeal, AppealHistory, ManagementOrganization)
 
 class UserApiTestCase(TestCase):
     def setUp(self):
@@ -1187,7 +1186,6 @@ class UKApiTestCase(TestCase):
         self.jk_user = User.objects.create_jkuser(max_id = "jk-user", name = "Il Rez", management_org = self.org)
         self.resident = User.objects.create_user(max_id = "resident-user", name = "Pon Rez")
         self.domik = Domik.objects.create(address = "г Понск, улица Поновая, д 52", fias_id = "fias-id", management_org = self.org)
-        JKDomik.objects.create(user = self.jk_user, domik = self.domik)
         self.apartment = Apartment.objects.create(domik = self.domik, number = "42", entrance = "1")
         UserApartment.objects.create(user = self.resident, apartment = self.apartment, role = UserApartment.Role.RESIDENT)
         self.appeal = Appeal.objects.create(author = self.resident, domik = self.domik, apartment = self.apartment, title = "ПОН", description = "Не работает НИЧЕГО", status = Appeal.Status.NEW)
@@ -1271,10 +1269,12 @@ class UKApiTestCase(TestCase):
         )
 
     def test_uk_user_does_not_see_unassigned_house(self):
+        another_org = ManagementOrganization.objects.create(name="ООО ПОН 2", inn="9876543210")
+
         another_domik = Domik.objects.create(
             address="г Понск, ул Другая, д 10",
             fias_id="foreign-fias",
-            management_org=self.org,
+            management_org=another_org,
         )
 
         self.client.force_login(self.jk_user)
@@ -1328,13 +1328,6 @@ class UKApiTestCase(TestCase):
         self.assertEqual(
             domik.management_org,
             self.org,
-        )
-
-        self.assertTrue(
-            JKDomik.objects.filter(
-                user=self.jk_user,
-                domik=domik,
-            ).exists()
         )
 
         self.assertEqual(
@@ -1481,10 +1474,12 @@ class UKApiTestCase(TestCase):
         )
 
     def test_cannot_get_unassigned_domik_detail(self):
+        another_org = ManagementOrganization.objects.create(name = "ООО ПОН 2", inn = "9876543210")
+
         another_domik = Domik.objects.create(
             address="Чужой дом",
             fias_id="foreign-detail-fias",
-            management_org=self.org,
+            management_org=another_org,
         )
 
         self.client.force_login(self.jk_user)
@@ -1542,10 +1537,12 @@ class UKApiTestCase(TestCase):
         )
 
     def test_uk_does_not_see_appeal_from_unassigned_house(self):
+        another_org = ManagementOrganization.objects.create(name="ООО ПОН 2", inn="9876543210")
+
         another_domik = Domik.objects.create(
             address="Чужой дом",
             fias_id="foreign-house",
-            management_org=self.org,
+            management_org=another_org,
         )
 
         another_apartment = Apartment.objects.create(
@@ -1648,10 +1645,12 @@ class UKApiTestCase(TestCase):
         )
 
     def test_cannot_update_appeal_from_unassigned_house(self):
+        another_org = ManagementOrganization.objects.create(name="ООО ПОН 2", inn="9876543210")
+
         another_domik = Domik.objects.create(
             address="Дом без доступа",
             fias_id="no-access-fias",
-            management_org=self.org,
+            management_org=another_org,
         )
 
         another_apartment = Apartment.objects.create(
