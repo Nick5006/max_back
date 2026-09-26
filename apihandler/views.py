@@ -20,6 +20,7 @@ from django.db import transaction
 from functools import wraps
 from apihandler.serializers.poll import get_user_domik_ids, serialize_poll_choice, serialize_poll
 from django.db.models import Count, Prefetch, Q
+from django.db import IntegrityError
 
 
 def api_login_required(view):
@@ -915,5 +916,165 @@ def uk_polls_view(request):
 
     if request.method == "POST":
         return create_poll(request)
+
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+@csrf_exempt
+@uk_required
+def uk_apartments_view(request, domik_id):
+    domik = Domik.objects.filter(
+        id=domik_id,
+        management_org=request.user.management_org,
+    ).first()
+
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    if request.method == "GET":
+        apartments = domik.apartments.order_by("number")
+        return JsonResponse({
+            "domik_id": str(domik.id),
+            "address": domik.address,
+            "apartments": [
+                {
+                    "id": str(a.id),
+                    "number": a.number,
+                    "entrance": a.entrance,
+                    "residents_count": a.user_apartments.count(),
+                }
+                for a in apartments
+            ],
+        }, status=200)
+
+    if request.method == "POST":
+        data, error = parse_json(request)
+        if error:
+            return error
+
+        number = (data.get("number") or "").strip()
+        entrance = (data.get("entrance") or "").strip()
+
+        if not number:
+            return JsonResponse({"status": "Поле number обязательно"}, status=400)
+
+        if Apartment.objects.filter(domik=domik, number=number).exists():
+            return JsonResponse(
+                {"status": f"Квартира с номером {number} уже есть в этом доме"},
+                status=409,
+            )
+
+        apartment = Apartment.objects.create(
+            domik=domik, number=number, entrance=entrance,
+        )
+        return JsonResponse({
+            "status": "ok",
+            "id": str(apartment.id),
+            "number": apartment.number,
+            "entrance": apartment.entrance,
+        }, status=201)
+
+    return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+@uk_required
+def uk_apartment_detail_view(request, domik_id, apartment_id):
+    domik = Domik.objects.filter(
+        id=domik_id,
+        management_org=request.user.management_org,
+    ).first()
+
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    apartment = Apartment.objects.filter(id=apartment_id, domik=domik).first()
+    if apartment is None:
+        return JsonResponse({"status": "Квартира не найдена"}, status=404)
+
+    if request.method == "GET":
+        residents = apartment.user_apartments.select_related("user").all()
+        return JsonResponse({
+            "id": str(apartment.id),
+            "number": apartment.number,
+            "entrance": apartment.entrance,
+            "domik_id": str(domik.id),
+            "domik_address": domik.address,
+            "residents": [
+                {
+                    "user_id": str(ua.user.id),
+                    "max_id": ua.user.max_id,
+                    "name": ua.user.name,
+                    "last_name": ua.user.last_name,
+                    "role": ua.role,
+                    "role_display": ua.get_role_display(),
+                    "is_primary": ua.is_primary,
+                }
+                for ua in residents
+            ],
+            "appeals_count": apartment.appeals.count(),
+        }, status=200)
+
+    if request.method == "PATCH":
+        data, error = parse_json(request)
+        if error:
+            return error
+
+        updated_fields = []
+
+        if "number" in data:
+            new_number = (data.get("number") or "").strip()
+            if not new_number:
+                return JsonResponse({"status": "number не может быть пустым"}, status=400)
+            if new_number != apartment.number:
+                if Apartment.objects.filter(domik=domik, number=new_number).exclude(pk=apartment.pk).exists():
+                    return JsonResponse(
+                        {"status": f"Квартира с номером {new_number} уже есть в этом доме"},
+                        status=409,
+                    )
+                apartment.number = new_number
+                updated_fields.append("number")
+
+        if "entrance" in data:
+            new_entrance = (data.get("entrance") or "").strip()
+            if new_entrance != apartment.entrance:
+                apartment.entrance = new_entrance
+                updated_fields.append("entrance")
+
+        if not updated_fields:
+            return JsonResponse({"status": "Нечего обновлять"}, status=400)
+
+        try:
+            apartment.save(update_fields=updated_fields)
+        except IntegrityError:
+            return JsonResponse(
+                {"status": "Конфликт уникальности: такой номер уже есть"},
+                status=409,
+            )
+
+        return JsonResponse({
+            "status": "ok",
+            "id": str(apartment.id),
+            "number": apartment.number,
+            "entrance": apartment.entrance,
+            "updated_fields": updated_fields,
+        }, status=200)
+
+    if request.method == "DELETE":
+        residents_count = apartment.user_apartments.count()
+        if residents_count:
+            return JsonResponse(
+                {"status": f"Нельзя удалить: в квартире {residents_count} жильцов/собственников"},
+                status=409,
+            )
+
+        appeals_count = apartment.appeals.count()
+        if appeals_count:
+            return JsonResponse(
+                {"status": f"Нельзя удалить: по квартире есть обращения ({appeals_count})"},
+                status=409,
+            )
+
+        apartment.delete()
+        return JsonResponse({"status": "ok"}, status=200)
 
     return JsonResponse({"status": "Method not allowed"}, status=405)

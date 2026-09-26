@@ -40,6 +40,11 @@
 | POST | `/api/v1/uk/domiks` | uk | Создать дом + квартиры |
 | GET | `/api/v1/uk/domiks/<id>` | uk | Детали дома + квартиры |
 | DELETE | `/api/v1/uk/domiks/<id>` | uk | Удалить дом (каскадно) |
+| GET | `/api/v1/uk/domiks/<id>/apartments` | uk | Список квартир дома |
+| POST | `/api/v1/uk/domiks/<id>/apartments` | uk | Создать квартиру в доме |
+| GET | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>` | uk | Детали квартиры + жильцы |
+| PATCH | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>` | uk | Изменить квартиру |
+| DELETE | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>` | uk | Удалить квартиру |
 | GET | `/api/v1/uk/appeals` | uk | Все обращения по домам УК |
 | POST | `/api/v1/uk/appeals/<id>/status` | uk | Обновить статус обращения |
 | GET | `/api/v1/uk/polls` | uk | Опросы по домам УК |
@@ -887,6 +892,195 @@
 **405:**
 ```json
 { "status": "Неправильный метод" }
+```
+
+---
+
+## GET /api/v1/uk/domiks/<id>/apartments
+
+Список квартир дома.  
+Доступ — только если дом принадлежит УК текущего сотрудника.
+
+**Auth:** да, сотрудник УК.
+
+**200:**
+```json
+{
+  "domik_id": "b3a1f4e2-5c8d-4a1b-9e2f-7d6c1a3b8e9f",
+  "address": "г Понск, улица Поновая, д 52",
+  "apartments": [
+    {
+      "id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "number": "1",
+      "entrance": "1",
+      "residents_count": 2
+    }
+  ]
+}
+```
+
+**404:**
+```json
+{ "status": "Дом не найден или нет доступа" }
+```
+
+---
+
+## POST /api/v1/uk/domiks/<id>/apartments
+
+Создать квартиру в доме.  
+Доступ — только если дом принадлежит УК текущего сотрудника.
+
+**Auth:** да, сотрудник УК.
+
+**Фронт кидает:**
+```json
+{
+  "number": "101",
+  "entrance": "2"
+}
+```
+
+`entrance` опционален.
+
+**201:**
+```json
+{
+  "status": "ok",
+  "id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+  "number": "101",
+  "entrance": "2"
+}
+```
+
+**400:**
+```json
+{ "status": "Некорректный JSON" }
+{ "status": "Поле number обязательно" }
+```
+
+**404:**
+```json
+{ "status": "Дом не найден или нет доступа" }
+```
+
+**409:**
+```json
+{ "status": "Квартира с номером 101 уже есть в этом доме" }
+```
+
+---
+
+## GET /api/v1/uk/domiks/<id>/apartments/<apartment_id>
+
+Детали квартиры + список жильцов/собственников.  
+Доступ — только если дом принадлежит УК текущего сотрудника.
+
+**Auth:** да, сотрудник УК.
+
+**200:**
+```json
+{
+  "id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+  "number": "42",
+  "entrance": "1",
+  "domik_id": "b3a1f4e2-5c8d-4a1b-9e2f-7d6c1a3b8e9f",
+  "domik_address": "г Понск, улица Поновая, д 52",
+  "residents": [
+    {
+      "user_id": "c1c2c3c4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "max_id": "ivan",
+      "name": "Иван",
+      "last_name": "Иванов",
+      "role": "resident",
+      "role_display": "Житель",
+      "is_primary": true
+    }
+  ],
+  "appeals_count": 3
+}
+```
+
+**404:**
+```json
+{ "status": "Дом не найден или нет доступа" }
+{ "status": "Квартира не найдена" }
+```
+
+---
+
+## PATCH /api/v1/uk/domiks/<id>/apartments/<apartment_id>
+
+Обновить данные квартиры (`number` и/или `entrance`).  
+Доступ — только если дом принадлежит УК текущего сотрудника.
+
+**Auth:** да, сотрудник УК.
+
+**Фронт кидает:**
+```json
+{
+  "number": "43",
+  "entrance": "2"
+}
+```
+
+Оба поля опциональны, но должен быть хотя бы одно.
+
+**200:**
+```json
+{
+  "status": "ok",
+  "id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+  "number": "43",
+  "entrance": "2",
+  "updated_fields": ["number", "entrance"]
+}
+```
+
+**400:**
+```json
+{ "status": "Некорректный JSON" }
+{ "status": "number не может быть пустым" }
+{ "status": "Нечего обновлять" }
+```
+
+**404:**
+```json
+{ "status": "Дом не найден или нет доступа" }
+{ "status": "Квартира не найдена" }
+```
+
+**409:**
+```json
+{ "status": "Квартира с номером 43 уже есть в этом доме" }
+{ "status": "Конфликт уникальности: такой номер уже есть" }
+```
+
+---
+
+## DELETE /api/v1/uk/domiks/<id>/apartments/<apartment_id>
+
+Удалить квартиру.  
+Нельзя удалить, если в квартире есть жильцы/собственники или по ней есть обращения.  
+Доступ — только если дом принадлежит УК текущего сотрудника.
+
+**Auth:** да, сотрудник УК.
+
+**200:**
+```json
+{ "status": "ok" }
+```
+
+**404:**
+```json
+{ "status": "Дом не найден или нет доступа" }
+{ "status": "Квартира не найдена" }
+```
+
+**409:**
+```json
+{ "status": "Нельзя удалить: в квартире 2 жильцов/собственников" }
+{ "status": "Нельзя удалить: по квартире есть обращения (3)" }
 ```
 
 ---
