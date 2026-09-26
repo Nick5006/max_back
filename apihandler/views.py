@@ -1,7 +1,6 @@
 from django.contrib.auth import login
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST, require_GET
 import json
 from apihandler.serializers.appeal import AppealCreateSerializer, AppealListSerializer
@@ -20,9 +19,16 @@ from apihandler.models import (
 from django.db import transaction
 from functools import wraps
 from apihandler.serializers.poll import get_user_domik_ids, serialize_poll_choice, serialize_poll
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, Q
 
 
+def api_login_required(view):
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse({"status": "Не авторизован"}, status=401)
+        return view(request, *args, **kwargs)
+    return wrapper
 
 def uk_required(view):
     @wraps(view)
@@ -49,9 +55,15 @@ MAX_APARTMENTS_PER_HOUSE = 1000
 
 def parse_json(request):
     try:
-        return json.loads(request.body), None
-    except json.JSONDecodeError:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None, JsonResponse({'status': 'Некорректный JSON'}, status=400)
+    if not isinstance(data, dict):
+        return None, JsonResponse(
+            {'status': 'Тело запроса должно быть JSON-объектом'},
+            status=400,
+        )
+    return data, None
 
 
 @csrf_exempt
@@ -137,7 +149,7 @@ def login_view(request):
 
 
 @csrf_exempt
-@login_required
+@api_login_required
 def appeals_view(request):
     if request.method == "GET":
         return get_appeals(request)
@@ -205,7 +217,7 @@ def get_appeals(request):
 
 
 @csrf_exempt
-@login_required
+@api_login_required
 def me_view(request):
     user = request.user
     user_apartments = user.user_apartments.select_related("apartment__domik")
@@ -237,7 +249,7 @@ def me_view(request):
 
 
 @csrf_exempt
-@login_required
+@api_login_required
 def apartments_view(request):
     if request.method == "GET":
         return list_user_apartments(request)
@@ -312,7 +324,8 @@ def create_apartment(request):
 
 
 @csrf_exempt
-@login_required
+@api_login_required
+@require_GET
 def appeal_detail_view(request, appeal_id):
     appeal = Appeal.objects.filter(
         id=appeal_id,
@@ -613,7 +626,7 @@ def uk_appeals_view(request):
 
 
 @csrf_exempt
-@login_required
+@api_login_required
 def polls_view(request):
     if request.method == "GET":
         return list_polls(request)
@@ -648,14 +661,18 @@ def list_polls(request):
         "polls": [serialize_poll(p, request) for p in polls],
     }, status=200)
 
-@csrf_exempt
-@login_required
-def poll_detail_view(request, poll_id):
-    domik_ids = get_user_domik_ids(request.user)
+def _poll_accessible_q(user):
+    q = Q(domik_id__in=get_user_domik_ids(user))
+    if user.is_jk and user.management_org_id:
+        q |= Q(domik__management_org_id=user.management_org_id)
+    return q
 
+@csrf_exempt
+@api_login_required
+def poll_detail_view(request, poll_id):
     poll = (
         Poll.objects
-        .filter(id=poll_id, domik_id__in=domik_ids)
+        .filter(_poll_accessible_q(request.user), id=poll_id)
         .select_related("author", "domik")
         .prefetch_related(
             Prefetch(
@@ -674,12 +691,15 @@ def poll_detail_view(request, poll_id):
 
 @csrf_exempt
 @require_POST
-@login_required
+@api_login_required
 def poll_vote_view(request, poll_id):
-    domik_ids = get_user_domik_ids(request.user)
+    if request.user.is_jk:
+        return JsonResponse(
+            {"status": "Сотрудники УК не голосуют"}, status=403
+        )
 
     poll = Poll.objects.filter(
-        id=poll_id, domik_id__in=domik_ids
+        _poll_accessible_q(request.user), id=poll_id
     ).first()
 
     if poll is None:
@@ -719,13 +739,11 @@ def poll_vote_view(request, poll_id):
     }, status=201 if created else 200)
 
 @csrf_exempt
-@login_required
+@api_login_required
 def poll_results_view(request, poll_id):
-    domik_ids = get_user_domik_ids(request.user)
-
     poll = (
         Poll.objects
-        .filter(id=poll_id, domik_id__in=domik_ids)
+        .filter(_poll_accessible_q(request.user), id=poll_id)
         .select_related("author", "domik")
         .first()
     )
