@@ -20,6 +20,7 @@ def uk_required(view):
         if not request.user.is_jk:
             return JsonResponse({"status": "Только для сотрудников УК"}, status=403)
         return view(request, *args, **kwargs)
+
     return wrapper
 
 
@@ -410,33 +411,41 @@ def create_domik(request):
 
 @csrf_exempt
 @uk_required
-def uk_domik_detail_view(request, domik_id):
-    domik = Domik.objects.filter(
-        id=domik_id,
-        jk_users__user=request.user,
-    ).first()
+def uk_domik_detail_or_delete_view(request, domik_id):
+    if request.method == "GET":
+        domik = Domik.objects.filter(
+            id=domik_id,
+            jk_users__user=request.user,
+        ).first()
+        if domik is None:
+            return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
 
-    if domik is None:
-        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+        apartments = domik.apartments.order_by("number")
 
-    apartments = domik.apartments.order_by("number")
+        return JsonResponse({
+            "id": str(domik.id),
+            "address": domik.address,
+            "fias_id": domik.fias_id,
+            "management_org": serialize_management_org(domik.management_org),
+            "created_at": domik.created_at,
+            "apartments": [
+                {
+                    "id": str(a.id),
+                    "number": a.number,
+                    "entrance": a.entrance,
+                    "residents_count": a.user_apartments.count(),
+                }
+                for a in apartments
+            ],
+        })
 
-    return JsonResponse({
-        "id": str(domik.id),
-        "address": domik.address,
-        "fias_id": domik.fias_id,
-        "management_org": serialize_management_org(domik.management_org),
-        "created_at": domik.created_at,
-        "apartments": [
-            {
-                "id": str(a.id),
-                "number": a.number,
-                "entrance": a.entrance,
-                "residents_count": a.user_apartments.count(),
-            }
-            for a in apartments
-        ],
-    })
+    if request.method == "DELETE":
+        management_org = request.user.management_org
+        deleted, _ = Domik.objects.filter(id=domik_id, management_org=management_org).delete()
+        if not deleted:
+            return JsonResponse({"status": "Дом не найден"}, status=404)
+        return JsonResponse({"status": "ok"}, status=200)
+    return JsonResponse({'status': "Неправильный метод"})
 
 
 @csrf_exempt

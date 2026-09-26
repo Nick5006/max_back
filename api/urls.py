@@ -19,7 +19,7 @@ from django.contrib import admin
 from django.urls import path
 
 from apihandler.views import login_view, me_view, apartments_view, appeals_view, appeal_detail_view, uk_domiks_view, \
-    uk_domik_detail_view, uk_appeals_view, uk_update_appeal_status_view
+    uk_domik_detail_or_delete_view, uk_appeals_view, uk_update_appeal_status_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -29,7 +29,7 @@ urlpatterns = [
     path('api/v1/user/appeals', appeals_view),
     path('api/v1/user/appeals/<uuid:appeal_id>', appeal_detail_view),
     path('api/v1/uk/domiks', uk_domiks_view),
-    path('api/v1/uk/domiks/<uuid:domik_id>', uk_domik_detail_view),
+    path('api/v1/uk/domiks/<uuid:domik_id>', uk_domik_detail_or_delete_view),
     path('api/v1/uk/appeals', uk_appeals_view),
     path('api/v1/uk/appeals/<uuid:appeal_id>/status', uk_update_appeal_status_view),
 ]
