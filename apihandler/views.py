@@ -5,11 +5,17 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST, require_GET
 import json
 from apihandler.serializers.appeal import AppealCreateSerializer, AppealListSerializer
-from apihandler.models import User, Apartment, Appeal, AppealHistory, UserApartment, ManagementOrganization
-import uuid as uuid_lib
+from apihandler.models import (
+    User,
+    Apartment,
+    Appeal,
+    AppealHistory,
+    UserApartment,
+    ManagementOrganization,
+    Domik,
+)
 from django.db import transaction
 from functools import wraps
-from apihandler.models import Domik, Apartment, JKDomik
 
 
 def uk_required(view):
@@ -19,6 +25,8 @@ def uk_required(view):
             return JsonResponse({"status": "Не авторизован"}, status=401)
         if not request.user.is_jk:
             return JsonResponse({"status": "Только для сотрудников УК"}, status=403)
+        if not request.user.management_org_id:
+            return JsonResponse({"status": "Нет привязки к УК"}, status=403)
         return view(request, *args, **kwargs)
 
     return wrapper
@@ -57,7 +65,11 @@ def login_view(request):
         user = User.objects.get(max_id=max_id)
         login(request, user)
         return JsonResponse(
-            {'status': 'Такой пользователь уже существует', 'id': str(user.id), 'is_jk': user.is_jk},
+            {
+                'status': 'Такой пользователь уже существует',
+                'id': str(user.id),
+                'is_jk': user.is_jk,
+            },
             status=200,
         )
 
@@ -67,18 +79,31 @@ def login_view(request):
         management_data = data.get("management_org")
 
         if not management_data:
-            return JsonResponse({"status": "Для сотрудника УК необходимо указать management_org"}, status=400)
+            return JsonResponse(
+                {"status": "Для сотрудника УК необходимо указать management_org"},
+                status=400,
+            )
 
         org_name = management_data.get("name")
         org_inn = management_data.get("inn")
 
         if not org_name or not org_inn:
-            return JsonResponse({"status": "Для management_org нужны поля name и inn"}, status=400)
+            return JsonResponse(
+                {"status": "Для management_org нужны поля name и inn"},
+                status=400,
+            )
 
-        management_org, created = ManagementOrganization.objects.get_or_create(inn=org_inn, defaults={"name": org_name})
+        management_org, created = ManagementOrganization.objects.get_or_create(
+            inn=org_inn,
+            defaults={"name": org_name},
+        )
 
         try:
-            user = User.objects.create_jkuser(max_id=max_id, name=name, management_org=management_org)
+            user = User.objects.create_jkuser(
+                max_id=max_id,
+                name=name,
+                management_org=management_org,
+            )
         except ValueError as e:
             return JsonResponse({'status': str(e)}, status=400)
 
@@ -97,11 +122,11 @@ def login_view(request):
             {
                 "id": str(user.management_org.id),
                 "name": user.management_org.name,
-                "inn": user.management_org.inn
+                "inn": user.management_org.inn,
             }
             if user.management_org
             else None
-        )
+        ),
     }, status=200)
 
 
@@ -128,7 +153,10 @@ def create_appeal(request):
     serializer = AppealCreateSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    apartment = Apartment.objects.filter(id=data["apartment_id"], user_apartments__user=request.user).first()
+    apartment = Apartment.objects.filter(
+        id=data["apartment_id"],
+        user_apartments__user=request.user,
+    ).first()
 
     if apartment is None:
         return JsonResponse({"status": "Квартира не найдена"}, status=404)
@@ -139,7 +167,7 @@ def create_appeal(request):
         domik=apartment.domik,
         title=data["title"],
         description=data["description"],
-        status=Appeal.Status.NEW
+        status=Appeal.Status.NEW,
     )
 
     AppealHistory.objects.create(
@@ -154,12 +182,17 @@ def create_appeal(request):
         "description": appeal.description,
         "management_org": serialize_management_org(apartment.domik.management_org),
         "status": appeal.status,
-        "created_at": appeal.created_at
+        "created_at": appeal.created_at,
     }, status=201)
 
 
 def get_appeals(request):
-    appeals = Appeal.objects.filter(author=request.user).select_related("apartment", "domik").order_by("-created_at")
+    appeals = (
+        Appeal.objects
+        .filter(author=request.user)
+        .select_related("apartment", "domik")
+        .order_by("-created_at")
+    )
     serializer = AppealListSerializer(appeals, many=True)
 
     return JsonResponse({"appeals": serializer.data}, status=200)
@@ -177,6 +210,7 @@ def me_view(request):
         "name": user.name,
         "last_name": user.last_name,
         "is_jk": user.is_jk,
+        "management_org": serialize_management_org(user.management_org),
         "apartments": [
             {
                 "id": str(ua.apartment.id),
@@ -184,7 +218,9 @@ def me_view(request):
                 "entrance": ua.apartment.entrance,
                 "domik_id": str(ua.apartment.domik.id),
                 "domik_address": ua.apartment.domik.address,
-                "management_org": serialize_management_org(ua.apartment.domik.management_org),
+                "management_org": serialize_management_org(
+                    ua.apartment.domik.management_org
+                ),
                 "role": ua.role,
                 "role_display": ua.get_role_display(),
                 "is_primary": ua.is_primary,
@@ -215,7 +251,9 @@ def list_user_apartments(request):
                 "entrance": ua.apartment.entrance,
                 "domik_id": str(ua.apartment.domik.id),
                 "domik_address": ua.apartment.domik.address,
-                "management_org": serialize_management_org(ua.apartment.domik.management_org),
+                "management_org": serialize_management_org(
+                    ua.apartment.domik.management_org
+                ),
                 "role": ua.role,
                 "role_display": ua.get_role_display(),
                 "is_primary": ua.is_primary,
@@ -234,7 +272,10 @@ def create_apartment(request):
     number = data.get("number")
 
     if not domik_id or not number:
-        return JsonResponse({"status": "Поля domik_id и number обязательны"}, status=400)
+        return JsonResponse(
+            {"status": "Поля domik_id и number обязательны"},
+            status=400,
+        )
 
     apartment = Apartment.objects.filter(domik_id=domik_id, number=number).first()
 
@@ -318,7 +359,11 @@ def uk_domiks_view(request):
 
 
 def list_uk_domiks(request):
-    domiks = Domik.objects.filter(jk_users__user=request.user).order_by("address")
+    domiks = (
+        Domik.objects
+        .filter(management_org=request.user.management_org)
+        .order_by("address")
+    )
 
     return JsonResponse({
         "domiks": [
@@ -329,7 +374,9 @@ def list_uk_domiks(request):
                 "management_org": serialize_management_org(d.management_org),
                 "apartments_count": d.apartments.count(),
                 "appeals_count": d.appeals.count(),
-                "new_appeals_count": d.appeals.filter(status=Appeal.Status.NEW).count(),
+                "new_appeals_count": d.appeals.filter(
+                    status=Appeal.Status.NEW
+                ).count(),
                 "created_at": d.created_at,
             }
             for d in domiks
@@ -355,23 +402,35 @@ def create_domik(request):
         return JsonResponse({"status": "Поле address обязательно"}, status=400)
 
     if fias_id and Domik.objects.filter(fias_id=fias_id).exists():
-        return JsonResponse({"status": "Дом с таким ФИАС ID уже существует"}, status=409)
+        return JsonResponse(
+            {"status": "Дом с таким ФИАС ID уже существует"},
+            status=409,
+        )
 
     if Domik.objects.filter(address=address).exists():
-        return JsonResponse({"status": "Дом с таким адресом уже существует"}, status=409)
+        return JsonResponse(
+            {"status": "Дом с таким адресом уже существует"},
+            status=409,
+        )
 
     from_num = apartments.get("from")
     to_num = apartments.get("to")
     entrance = (apartments.get("entrance") or "").strip()
 
     if from_num is None or to_num is None:
-        return JsonResponse({"status": "Нужны apartments.from и apartments.to"}, status=400)
+        return JsonResponse(
+            {"status": "Нужны apartments.from и apartments.to"},
+            status=400,
+        )
 
     try:
         from_num = int(from_num)
         to_num = int(to_num)
     except (ValueError, TypeError):
-        return JsonResponse({"status": "from и to должны быть целыми числами"}, status=400)
+        return JsonResponse(
+            {"status": "from и to должны быть целыми числами"},
+            status=400,
+        )
 
     if from_num < 1:
         return JsonResponse({"status": "from должен быть >= 1"}, status=400)
@@ -382,7 +441,12 @@ def create_domik(request):
     total = to_num - from_num + 1
     if total > MAX_APARTMENTS_PER_HOUSE:
         return JsonResponse(
-            {"status": f"Слишком большой диапазон: макс {MAX_APARTMENTS_PER_HOUSE} квартир"},
+            {
+                "status": (
+                    f"Слишком большой диапазон: "
+                    f"макс {MAX_APARTMENTS_PER_HOUSE} квартир"
+                ),
+            },
             status=400,
         )
 
@@ -392,7 +456,6 @@ def create_domik(request):
             fias_id=fias_id,
             management_org=management_org,
         )
-        JKDomik.objects.create(user=request.user, domik=domik)
 
         apartments_to_create = [
             Apartment(domik=domik, number=str(n), entrance=entrance)
@@ -412,13 +475,19 @@ def create_domik(request):
 @csrf_exempt
 @uk_required
 def uk_domik_detail_or_delete_view(request, domik_id):
+    management_org = request.user.management_org
+
     if request.method == "GET":
         domik = Domik.objects.filter(
             id=domik_id,
-            jk_users__user=request.user,
+            management_org=management_org,
         ).first()
+
         if domik is None:
-            return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+            return JsonResponse(
+                {"status": "Дом не найден или нет доступа"},
+                status=404,
+            )
 
         apartments = domik.apartments.order_by("number")
 
@@ -440,12 +509,15 @@ def uk_domik_detail_or_delete_view(request, domik_id):
         })
 
     if request.method == "DELETE":
-        management_org = request.user.management_org
-        deleted, _ = Domik.objects.filter(id=domik_id, management_org=management_org).delete()
+        deleted, _ = Domik.objects.filter(
+            id=domik_id,
+            management_org=management_org,
+        ).delete()
         if not deleted:
             return JsonResponse({"status": "Дом не найден"}, status=404)
         return JsonResponse({"status": "ok"}, status=200)
-    return JsonResponse({'status': "Неправильный метод"})
+
+    return JsonResponse({"status": "Неправильный метод"}, status=405)
 
 
 @csrf_exempt
@@ -454,7 +526,7 @@ def uk_domik_detail_or_delete_view(request, domik_id):
 def uk_update_appeal_status_view(request, appeal_id):
     appeal = Appeal.objects.filter(
         id=appeal_id,
-        domik__jk_users__user=request.user,
+        domik__management_org=request.user.management_org,
     ).first()
 
     if appeal is None:
@@ -499,9 +571,12 @@ def uk_appeals_view(request):
     status_filter = request.GET.get("status")
     domik_id = request.GET.get("domik_id")
 
-    qs = Appeal.objects.filter(
-        domik__jk_users__user=request.user,
-    ).select_related("author", "domik", "apartment").order_by("-created_at")
+    qs = (
+        Appeal.objects
+        .filter(domik__management_org=request.user.management_org)
+        .select_related("author", "domik", "apartment")
+        .order_by("-created_at")
+    )
 
     if status_filter:
         qs = qs.filter(status=status_filter)

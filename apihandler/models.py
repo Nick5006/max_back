@@ -137,18 +137,6 @@ class UserApartment(models.Model):
         super().save(*args, **kwargs)
 
 
-
-class JKDomik(models.Model):
-    user = models.ForeignKey("User", on_delete=models.CASCADE, related_name="jk_domiks")
-    domik = models.ForeignKey(Domik, on_delete=models.CASCADE, related_name="jk_users")
-
-    class Meta:
-        unique_together = ("user", "domik")
-        ordering = ["domik__address"]
-
-    def __str__(self):
-        return f"{self.user} @ {self.domik}"
-
 class Appeal(models.Model):
     class Status(models.TextChoices):
         NEW = "new", "Новая"

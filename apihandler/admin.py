@@ -8,7 +8,7 @@ from .models import (
     Domik,
     Apartment,
     UserApartment,
-    JKDomik,
+    ManagementOrganization,
     Appeal,
     AppealHistory,
 )
@@ -78,15 +78,6 @@ class UserApartmentInline(admin.TabularInline):
     classes = ("collapse",)
 
 
-class JKDomikInline(admin.TabularInline):
-    model = JKDomik
-    extra = 0
-    autocomplete_fields = ("domik",)
-    verbose_name = "Дом"
-    verbose_name_plural = "Дома, которые обслуживает сотрудник"
-    classes = ("collapse",)
-
-
 class ApartmentInline(admin.TabularInline):
     model = Apartment
     extra = 0
@@ -107,15 +98,6 @@ class ResidentInline(admin.TabularInline):
     classes = ("collapse",)
 
 
-class JKDomikInlineInDomik(admin.TabularInline):
-    model = JKDomik
-    extra = 0
-    autocomplete_fields = ("user",)
-    verbose_name = "Сотрудник УК"
-    verbose_name_plural = "Сотрудники УК"
-    classes = ("collapse",)
-
-
 class AppealHistoryInline(admin.TabularInline):
     model = AppealHistory
     extra = 0
@@ -129,17 +111,62 @@ class AppealHistoryInline(admin.TabularInline):
         return False
 
 
+class DomikInlineInOrg(admin.TabularInline):
+    model = Domik
+    fk_name = "management_org"
+    extra = 0
+    fields = ("address", "fias_id")
+    show_change_link = True
+    verbose_name = "Дом"
+    verbose_name_plural = "Дома под управлением"
+    classes = ("collapse",)
+
+
+class UKStaffInline(admin.TabularInline):
+    model = User
+    fk_name = "management_org"
+    extra = 0
+    fields = ("max_id", "name", "last_name", "is_jk", "is_active")
+    show_change_link = True
+    verbose_name = "Сотрудник УК"
+    verbose_name_plural = "Сотрудники УК"
+    classes = ("collapse",)
+
+
+@admin.register(ManagementOrganization)
+class ManagementOrganizationAdmin(admin.ModelAdmin):
+    list_display = ("name", "inn", "domiks_count", "staff_count", "created_at")
+    search_fields = ("name", "inn")
+    readonly_fields = ("id", "created_at")
+    ordering = ("name",)
+    list_per_page = 50
+    inlines = [DomikInlineInOrg, UKStaffInline]
+
+    @admin.display(description="Домов")
+    def domiks_count(self, obj):
+        return badge(str(obj.domiks.count()), "#0ea5e9")
+
+    @admin.display(description="Сотрудников")
+    def staff_count(self, obj):
+        return badge(str(obj.jk_users.count()), "#7c3aed")
+
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     list_display = (
         "avatar", "max_id", "name", "last_name",
-        "is_jk_badge", "is_staff_badge", "is_active_badge", "date_joined",
+        "management_org", "is_jk_badge", "is_staff_badge",
+        "is_active_badge", "date_joined",
     )
     list_display_links = ("max_id", "name")
-    list_filter = ("is_jk", "is_staff", "is_superuser", "is_active", "date_joined")
-    search_fields = ("max_id", "name", "last_name", "id")
+    list_filter = (
+        "is_jk", "is_staff", "is_superuser", "is_active",
+        "management_org", "date_joined",
+    )
+    search_fields = ("max_id", "name", "last_name", "id", "management_org__name")
     ordering = ("-date_joined", "name")
     readonly_fields = ("id", "last_login", "date_joined", "avatar")
+    autocomplete_fields = ("management_org",)
     list_per_page = 25
     date_hierarchy = "date_joined"
 
@@ -147,7 +174,7 @@ class UserAdmin(BaseUserAdmin):
         ("Личное", {"fields": ("id", "avatar", "max_id", "name", "last_name")}),
         ("Права", {
             "fields": (
-                "is_active", "is_staff", "is_jk",
+                "is_active", "is_staff", "is_jk", "management_org",
                 "is_superuser", "groups", "user_permissions",
             ),
         }),
@@ -161,7 +188,7 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
 
-    inlines = [UserApartmentInline, JKDomikInline]
+    inlines = [UserApartmentInline]
 
     @admin.display(description="")
     def avatar(self, obj):
@@ -191,22 +218,19 @@ class UserAdmin(BaseUserAdmin):
 class DomikAdmin(admin.ModelAdmin):
     list_display = (
         "address", "management_org", "fias_id",
-        "apartments_count", "jk_users_count", "appeals_count", "created_at",
+        "apartments_count", "appeals_count", "created_at",
     )
-    search_fields = ("address", "fias_id", "management_org")
+    search_fields = ("address", "fias_id", "management_org__name")
     ordering = ("address",)
     readonly_fields = ("id", "created_at")
     list_per_page = 25
-    inlines = [ApartmentInline, JKDomikInlineInDomik]
+    autocomplete_fields = ("management_org",)
+    inlines = [ApartmentInline]
     list_filter = ("management_org",)
 
     @admin.display(description="Квартир")
     def apartments_count(self, obj):
         return badge(str(obj.apartments.count()), "#0ea5e9")
-
-    @admin.display(description="Сотрудников УК")
-    def jk_users_count(self, obj):
-        return badge(str(obj.jk_users.count()), "#7c3aed")
 
     @admin.display(description="Обращений")
     def appeals_count(self, obj):
@@ -249,16 +273,6 @@ class UserApartmentAdmin(admin.ModelAdmin):
     @admin.display(description="Роль", ordering="role")
     def role_badge(self, obj):
         return badge(obj.get_role_display(), ROLE_COLORS.get(obj.role, "#64748b"))
-
-
-@admin.register(JKDomik)
-class JKDomikAdmin(admin.ModelAdmin):
-    list_display = ("user", "domik")
-    list_filter = ("domik",)
-    search_fields = ("user__max_id", "user__name", "domik__address")
-    autocomplete_fields = ("user", "domik")
-    ordering = ("domik__address", "user__name")
-    list_per_page = 50
 
 
 @admin.register(Appeal)
