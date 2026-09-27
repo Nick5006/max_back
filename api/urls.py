@@ -27,13 +27,14 @@ from apihandler.views import (
     uk_polls_view, uk_poll_close_view, uk_poll_delete_view,
     uk_notifications_view, notifications_view, user_notification_detail_view, uk_notification_detail_view,
     uk_apartments_view, uk_apartment_detail_view, user_capital_repair_view, uk_capital_repair_view,
-    uk_capital_repair_works_view, uk_capital_repair_work_detail_view,
+    uk_capital_repair_works_view, uk_capital_repair_work_detail_view, search_domiks_view, uk_appeal_detail_view,
 )
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/login', login_view),
     path('api/v1/me', me_view),
+    path('api/v1/domiks', search_domiks_view),
     path('api/v1/user/apartments', apartments_view),
     path('api/v1/user/appeals', appeals_view),
     path('api/v1/user/appeals/<uuid:appeal_id>', appeal_detail_view),
@@ -48,6 +49,7 @@ urlpatterns = [
     path('api/v1/uk/domiks', uk_domiks_view),
     path('api/v1/uk/domiks/<uuid:domik_id>', uk_domik_detail_or_delete_view),
     path('api/v1/uk/appeals', uk_appeals_view),
+    path('api/v1/uk/appeals/<uuid:appeal_id>', uk_appeal_detail_view),
     path('api/v1/uk/appeals/<uuid:appeal_id>/status', uk_update_appeal_status_view),
     path('api/v1/uk/polls', uk_polls_view),
     path('api/v1/uk/polls/<uuid:poll_id>/close', uk_poll_close_view),

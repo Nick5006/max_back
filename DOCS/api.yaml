@@ -4,7 +4,7 @@ info:
   description: |
     REST API для взаимодействия жильцов и сотрудников управляющих компаний (УК)
     с домами, квартирами, обращениями, опросами, уведомлениями и капремонтом.
-  version: 1.0.0
+  version: 1.1.0
 servers:
   - url: http://127.0.0.1:8000
     description: Dev
@@ -65,6 +65,38 @@ paths:
                 $ref: '#/components/schemas/MeResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  # ---------- PUBLIC: DOMIKS SEARCH ----------
+
+  /api/v1/domiks:
+    get:
+      tags: [User]
+      summary: Поиск домов по адресу
+      description: |
+        Поиск домов по подстроке адреса (регистронезависимо).
+        Минимум 2 символа в `search`, иначе вернётся пустой список.
+        `limit` ограничен диапазоном 1–50.
+      parameters:
+        - name: search
+          in: query
+          description: Подстрока адреса
+          schema: { type: string, minLength: 2 }
+        - name: limit
+          in: query
+          description: Максимум результатов
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domiks:
+                    type: array
+                    items: { $ref: '#/components/schemas/DomikSearchItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ---------- USER: APARTMENTS ----------
 
@@ -344,6 +376,10 @@ paths:
     post:
       tags: [UK]
       summary: Создать дом + квартиры
+      description: |
+        Создаёт дом и квартиры. `apartments` может быть либо объектом
+        (один диапазон), либо массивом объектов (несколько диапазонов — например,
+        по подъездам). Номера квартир не должны повторяться между диапазонами.
       requestBody:
         required: true
         content:
@@ -355,12 +391,11 @@ paths:
                 address: { type: string }
                 fias_id: { type: string }
                 apartments:
-                  type: object
-                  required: [from, to]
-                  properties:
-                    from: { type: integer, minimum: 1 }
-                    to:   { type: integer }
-                    entrance: { type: string }
+                  oneOf:
+                    - $ref: '#/components/schemas/ApartmentsRange'
+                    - type: array
+                      minItems: 1
+                      items: { $ref: '#/components/schemas/ApartmentsRange' }
       responses:
         '201':
           description: Дом создан
@@ -536,6 +571,23 @@ paths:
                     items: { $ref: '#/components/schemas/UKAppealListItem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/uk/appeals/{id}:
+    get:
+      tags: [UK]
+      summary: Детали обращения + история (УК)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UKAppealDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /api/v1/uk/appeals/{id}/status:
     post:
@@ -1122,6 +1174,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         title: { type: string }
+        description: { type: string }
         status: { type: string }
         status_display: { type: string }
         author:
@@ -1135,6 +1188,53 @@ components:
         apartment_number: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    UKAppealDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [new, in_progress, done, rejected] }
+        status_display: { type: string }
+        author:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            max_id: { type: string }
+            name: { type: string }
+            last_name: { type: string }
+        domik:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            address: { type: string }
+            management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        apartment:
+          nullable: true
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            number: { type: string }
+            entrance: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              status_display: { type: string }
+              text: { type: string }
+              changed_by:
+                nullable: true
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  last_name: { type: string }
+              changed_at: { type: string, format: date-time }
 
     AppealStatusUpdateResponse:
       type: object
@@ -1274,6 +1374,21 @@ components:
                 address: { type: string }
 
     # --------- DOMIKS & APARTMENTS ---------
+
+    ApartmentsRange:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: integer, minimum: 1, description: Номер первой квартиры в диапазоне }
+        to:   { type: integer, description: Номер последней квартиры в диапазоне }
+        entrance: { type: string, description: Номер подъезда }
+
+    DomikSearchItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        address: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
 
     DomikListItem:
       type: object

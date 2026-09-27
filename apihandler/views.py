@@ -177,7 +177,8 @@ def create_appeal(request):
         return error
 
     serializer = AppealCreateSerializer(data=data)
-    serializer.is_valid(raise_exception=True)
+    if not serializer.is_valid():
+        return JsonResponse({"status": serializer.errors}, status=400)
     data = serializer.validated_data
     apartment = Apartment.objects.filter(
         id=data["apartment_id"],
@@ -423,7 +424,7 @@ def create_domik(request):
 
     address = (data.get("address") or "").strip()
     fias_id = (data.get("fias_id") or "").strip()
-    apartments = data.get("apartments") or {}
+    apartments_raw = data.get("apartments")
 
     if not address:
         return JsonResponse({"status": "Поле address обязательно"}, status=400)
@@ -440,42 +441,84 @@ def create_domik(request):
             status=409,
         )
 
-    from_num = apartments.get("from")
-    to_num = apartments.get("to")
-    entrance = (apartments.get("entrance") or "").strip()
-
-    if from_num is None or to_num is None:
+    if isinstance(apartments_raw, dict):
+        ranges = [apartments_raw]
+    elif isinstance(apartments_raw, list):
+        ranges = apartments_raw
+    else:
         return JsonResponse(
-            {"status": "Нужны apartments.from и apartments.to"},
+            {"status": "Поле apartments должно быть объектом или массивом"},
             status=400,
         )
 
-    try:
-        from_num = int(from_num)
-        to_num = int(to_num)
-    except (ValueError, TypeError):
+    if not ranges:
         return JsonResponse(
-            {"status": "from и to должны быть целыми числами"},
+            {"status": "Нужно указать хотя бы один диапазон квартир"},
             status=400,
         )
 
-    if from_num < 1:
-        return JsonResponse({"status": "from должен быть >= 1"}, status=400)
+    prepared = []
+    numbers_seen = set()
 
-    if to_num < from_num:
-        return JsonResponse({"status": "to должен быть >= from"}, status=400)
+    for idx, r in enumerate(ranges):
+        if not isinstance(r, dict):
+            return JsonResponse(
+                {"status": f"Элемент apartments[{idx}] должен быть объектом"},
+                status=400,
+            )
 
-    total = to_num - from_num + 1
-    if total > MAX_APARTMENTS_PER_HOUSE:
-        return JsonResponse(
-            {
-                "status": (
-                    f"Слишком большой диапазон: "
-                    f"макс {MAX_APARTMENTS_PER_HOUSE} квартир"
-                ),
-            },
-            status=400,
-        )
+        from_num = r.get("from")
+        to_num = r.get("to")
+        entrance = (r.get("entrance") or "").strip()
+
+        if from_num is None or to_num is None:
+            return JsonResponse(
+                {"status": f"Нужны поля from и to в apartments[{idx}]"},
+                status=400,
+            )
+
+        try:
+            from_num = int(from_num)
+            to_num = int(to_num)
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"status": f"from и to в apartments[{idx}] должны быть целыми числами"},
+                status=400,
+            )
+
+        if from_num < 1:
+            return JsonResponse(
+                {"status": f"from в apartments[{idx}] должен быть >= 1"},
+                status=400,
+            )
+
+        if to_num < from_num:
+            return JsonResponse(
+                {"status": f"to в apartments[{idx}] должен быть >= from"},
+                status=400,
+            )
+
+        total = to_num - from_num + 1
+        if total > MAX_APARTMENTS_PER_HOUSE:
+            return JsonResponse(
+                {
+                    "status": (
+                        f"Слишком большой диапазон в apartments[{idx}]: "
+                        f"макс {MAX_APARTMENTS_PER_HOUSE} квартир"
+                    ),
+                },
+                status=400,
+            )
+
+        for n in range(from_num, to_num + 1):
+            num_str = str(n)
+            if num_str in numbers_seen:
+                return JsonResponse(
+                    {"status": f"Квартира с номером {num_str} встречается в нескольких диапазонах"},
+                    status=400,
+                )
+            numbers_seen.add(num_str)
+            prepared.append((num_str, entrance))
 
     with transaction.atomic():
         domik = Domik.objects.create(
@@ -485,8 +528,8 @@ def create_domik(request):
         )
 
         apartments_to_create = [
-            Apartment(domik=domik, number=str(n), entrance=entrance)
-            for n in range(from_num, to_num + 1)
+            Apartment(domik=domik, number=num, entrance=entrance)
+            for num, entrance in prepared
         ]
         Apartment.objects.bulk_create(apartments_to_create)
 
@@ -615,6 +658,7 @@ def uk_appeals_view(request):
             {
                 "id": str(a.id),
                 "title": a.title,
+                "description": a.description,
                 "status": a.status,
                 "status_display": a.get_status_display(),
                 "author": {
@@ -942,7 +986,7 @@ def uk_create_notification(request):
     data, error = parse_json(request)
 
     if error:
-        return JsonResponse({"status": error}, status=400)
+        return error
 
     serializer = NotificationSerializer(data=data)
 
@@ -1602,3 +1646,104 @@ def uk_capital_repair_work_detail_view(request, domik_id, work_id):
         return JsonResponse({"status": "ok"}, status=200)
 
     return JsonResponse({"status": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+@api_login_required
+@require_GET
+def search_domiks_view(request):
+    query = (request.GET.get("search") or "").strip()
+
+    try:
+        limit = int(request.GET.get("limit", 10))
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 50))
+
+    if len(query) < 2:
+        return JsonResponse({"domiks": []}, status=200)
+
+    domiks = (
+        Domik.objects
+        .filter(address__icontains=query)
+        .select_related("management_org")
+        .order_by("address")[:limit]
+    )
+
+    return JsonResponse({
+        "domiks": [
+            {
+                "id": str(d.id),
+                "address": d.address,
+                "management_org": serialize_management_org(d.management_org),
+            }
+            for d in domiks
+        ],
+    }, status=200)
+
+@csrf_exempt
+@uk_required
+@require_GET
+def uk_appeal_detail_view(request, appeal_id):
+    appeal = (
+        Appeal.objects
+        .filter(
+            id=appeal_id,
+            domik__management_org=request.user.management_org,
+        )
+        .select_related("author", "domik", "apartment")
+        .first()
+    )
+
+    if appeal is None:
+        return JsonResponse({"status": "Обращение не найдено"}, status=404)
+
+    history = appeal.appeal_history.select_related("changed_by").all()
+
+    return JsonResponse({
+        "id": str(appeal.id),
+        "title": appeal.title,
+        "description": appeal.description,
+        "status": appeal.status,
+        "status_display": appeal.get_status_display(),
+        "author": {
+            "id": str(appeal.author.id),
+            "max_id": appeal.author.max_id,
+            "name": appeal.author.name,
+            "last_name": appeal.author.last_name,
+        },
+        "domik": {
+            "id": str(appeal.domik.id),
+            "address": appeal.domik.address,
+            "management_org": serialize_management_org(appeal.domik.management_org),
+        },
+        "apartment": (
+            {
+                "id": str(appeal.apartment.id),
+                "number": appeal.apartment.number,
+                "entrance": appeal.apartment.entrance,
+            }
+            if appeal.apartment
+            else None
+        ),
+        "created_at": appeal.created_at,
+        "updated_at": appeal.updated_at,
+        "history": [
+            {
+                "status": h.status,
+                "status_display": h.get_status_display(),
+                "text": h.text,
+                "changed_by": (
+                    {
+                        "id": str(h.changed_by.id),
+                        "name": h.changed_by.name,
+                        "last_name": h.changed_by.last_name,
+                    }
+                    if h.changed_by
+                    else None
+                ),
+                "changed_at": h.changed_at,
+            }
+            for h in history
+        ],
+    })
