@@ -14,8 +14,8 @@ services:
       DJANGO_DEBUG: "0"
       ALLOWED_HOSTS: "*"
       DB_PATH: "/app/data/db.sqlite3"
-      CORS_ALLOWED_ORIGINS: "https://forge.etsi.org"
-      CSRF_TRUSTED_ORIGINS: "https://*.cloudpub.ru,https://*.trycloudflare.com"
+      CORS_ALLOWED_ORIGINS: "https://max-front-pearl.vercel.app,https://forge.etsi.org"
+      CSRF_TRUSTED_ORIGINS: "https://max-front-pearl.vercel.app,https://*.cloudpub.ru,https://*.trycloudflare.com"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/admin/login/"]
