@@ -134,7 +134,7 @@ CORS_ALLOWED_ORIGINS = [
     o.strip()
     for o in os.environ.get(
         "CORS_ALLOWED_ORIGINS",
-        "https://max-front-pearl.vercel.app,https://forge.etsi.org",
+        "https://max-front-pearl.vercel.app,https://forge.etsi.org,https://platform-api2.max.ru",
     ).split(",")
     if o.strip()
 ]
@@ -143,7 +143,7 @@ CSRF_TRUSTED_ORIGINS = [
     o.strip()
     for o in os.environ.get(
         "CSRF_TRUSTED_ORIGINS",
-        "https://max-front-pearl.vercel.app,https://*.cloudpub.ru,https://*.trycloudflare.com",
+        "https://max-front-pearl.vercel.app,https://*.cloudpub.ru,https://*.trycloudflare.com,https://platform-api2.max.ru",
     ).split(",")
     if o.strip()
 ]
