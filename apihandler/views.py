@@ -28,6 +28,7 @@ from apihandler.serializers.capital_repair import serialize_capital_repair_work,
 from django.db.models import Count, Prefetch, Q
 from django.db import IntegrityError
 from decimal import Decimal, InvalidOperation
+from apihandler.max_bot.notifications import send_message
 
 
 def api_login_required(view):
@@ -72,6 +73,43 @@ def parse_json(request):
             status=400,
         )
     return data, None
+
+def _format_money(value, suffix="₽"):
+    if value is None:
+        return "не указано"
+
+    value = Decimal(value)
+    formatted = f"{value:,.2f}".replace(",", " ").replace(".", ",")
+    formatted = formatted.rstrip("0").rstrip(",")
+    return f"{formatted} {suffix}"
+
+
+def _safe_send_message(max_id, message):
+    if not max_id:
+        return False
+
+    try:
+        send_message(max_id, message)
+        return True
+    except Exception:
+        return False
+
+
+def _send_to_domik_users(domik, message):
+    max_ids = (
+        User.objects
+        .filter(
+            user_apartments__apartment__domik=domik,
+            is_active=True,
+        )
+        .exclude(max_id="")
+        .exclude(max_id__isnull=True)
+        .values_list("max_id", flat=True)
+        .distinct()
+    )
+
+    for max_id in max_ids.iterator():
+        _safe_send_message(max_id, message)
 
 
 @csrf_exempt
@@ -627,6 +665,18 @@ def uk_update_appeal_status_view(request, appeal_id):
             text=text,
         )
 
+    message_lines = [
+        "📝 Статус заявки изменён",
+        "",
+        f"🏠 {appeal.domik.address}",
+        f"Заявка: {appeal.title}",
+        f"Статус: {appeal.get_status_display()}",
+    ]
+    if text:
+        message_lines.extend(["", f"Комментарий УК: {text}"])
+
+    _safe_send_message(appeal.author.max_id, "\n".join(message_lines))
+
     return JsonResponse({
         "status": "ok",
         "appeal_id": str(appeal.id),
@@ -890,6 +940,19 @@ def create_poll(request):
         .prefetch_related("choices")
         .get(pk=poll.pk)
     )
+
+    message_lines = [
+        "📊 Новый опрос",
+        "",
+        f"🏠 {domik.address}",
+        f"{title}",
+    ]
+    if description:
+        message_lines.extend(["", description])
+    message_lines.extend(["", "Откройте приложение, чтобы проголосовать."])
+
+    _send_to_domik_users(domik, "\n".join(message_lines))
+
     return JsonResponse(serialize_poll(poll, request), status=201)
 
 
@@ -911,6 +974,14 @@ def uk_poll_close_view(request, poll_id):
 
     poll.is_active = False
     poll.save(update_fields=["is_active"])
+
+    message = (
+        "✅ Опрос завершён\n\n"
+        f"🏠 {poll.domik.address}\n"
+        f"{poll.title}\n\n"
+        "Голосование закрыто. Результаты доступны в приложении."
+    )
+    _send_to_domik_users(poll.domik, message)
 
     return JsonResponse({
         "status": "ok",
@@ -1005,6 +1076,13 @@ def uk_create_notification(request):
         title=data["title"],
         text=data["text"],
     )
+
+    message = (
+        f"🔔 {notification.title}\n\n"
+        f"🏠 {domik.address}\n\n"
+        f"{notification.text}"
+    )
+    _send_to_domik_users(domik, message)
 
     return JsonResponse({
         "status": "ok",
@@ -1438,6 +1516,15 @@ def uk_capital_repair_view(request, domik_id):
             return JsonResponse({"status": "Тариф не может быть отрицательным"}, status=400)
 
         cr = CapitalRepair.objects.create(domik=domik, tariff_per_sqm=tariff)
+
+        message = (
+            "🏗️ Капитальный ремонт\n\n"
+            f"🏠 {domik.address}\n\n"
+            "Открыт счёт капитального ремонта.\n"
+            f"Тариф: {_format_money(tariff, '₽/м²')}"
+        )
+        _send_to_domik_users(domik, message)
+
         return JsonResponse({
             "status": "ok",
             "capital_repair": serialize_capital_repair(cr),
@@ -1471,6 +1558,24 @@ def uk_capital_repair_view(request, domik_id):
 
         if not updated:
             return JsonResponse({"status": "Нечего обновлять"}, status=400)
+
+        field_labels = {
+            "tariff_per_sqm": ("Тариф", "₽/м²"),
+            "collected_total": ("Собрано", "₽"),
+            "spent_total": ("Потрачено", "₽"),
+        }
+        changes = [
+            f"• {field_labels[field][0]}: "
+            f"{_format_money(getattr(cr, field), field_labels[field][1])}"
+            for field in updated
+        ]
+
+        message = (
+                "💰 Обновление по капремонту\n\n"
+                f"🏠 {domik.address}\n\n"
+                + "\n".join(changes)
+        )
+        _send_to_domik_users(domik, message)
 
         cr.save(update_fields=updated + ["updated_at"])
         return JsonResponse({
@@ -1554,6 +1659,23 @@ def uk_capital_repair_works_view(request, domik_id):
             completed_at=completed_at,
         )
 
+        message_lines = [
+            "🛠 Новая работа по капремонту",
+            "",
+            f"🏠 {domik.address}",
+            f"Работа: {work.work_type}",
+            f"Плановый год: {work.planned_year}",
+            f"Статус: {work.get_status_display()}",
+        ]
+        if work.cost is not None:
+            message_lines.append(f"Стоимость: {_format_money(work.cost)}")
+        if work.contractor:
+            message_lines.append(f"Подрядчик: {work.contractor}")
+        if work.description:
+            message_lines.extend(["", work.description])
+
+        _send_to_domik_users(domik, "\n".join(message_lines))
+
         return JsonResponse({
             "status": "ok",
             "work": serialize_capital_repair_work(work),
@@ -1634,6 +1756,35 @@ def uk_capital_repair_work_detail_view(request, domik_id, work_id):
         if not updated:
             return JsonResponse({"status": "Нечего обновлять"}, status=400)
 
+        field_labels = {
+            "work_type": "Работа",
+            "planned_year": "Плановый год",
+            "status": "Статус",
+            "cost": "Стоимость",
+            "contractor": "Подрядчик",
+            "description": "Описание",
+            "completed_at": "Дата завершения",
+        }
+
+        changes = []
+        for field in updated:
+            if field == "status":
+                value = work.get_status_display()
+            elif field == "cost":
+                value = _format_money(work.cost) if work.cost is not None else "не указана"
+            else:
+                value = getattr(work, field)
+                value = value if value not in (None, "") else "не указано"
+            changes.append(f"• {field_labels[field]}: {value}")
+
+        message = (
+                "🛠 Изменение работы по капремонту\n\n"
+                f"🏠 {domik.address}\n"
+                f"Работа: {work.work_type}\n\n"
+                + "\n".join(changes)
+        )
+        _send_to_domik_users(domik, message)
+
         work.save(update_fields=updated)
         return JsonResponse({
             "status": "ok",
@@ -1642,7 +1793,18 @@ def uk_capital_repair_work_detail_view(request, domik_id, work_id):
         }, status=200)
 
     if request.method == "DELETE":
+        work_type = work.work_type
+        planned_year = work.planned_year
         work.delete()
+
+        message = (
+            "🗑 Работа по капремонту удалена\n\n"
+            f"🏠 {domik.address}\n"
+            f"Работа: {work_type}\n"
+            f"Плановый год: {planned_year}"
+        )
+        _send_to_domik_users(domik, message)
+
         return JsonResponse({"status": "ok"}, status=200)
 
     return JsonResponse({"status": "Method not allowed"}, status=405)

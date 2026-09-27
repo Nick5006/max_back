@@ -24,6 +24,9 @@ SECRET_KEY = os.environ.get(
     "django-insecure-cr)nt5yh6s8jo)ceh+=@tu+i+ff%gi-r&h6!u_nce83qa%$kz1",
 )
 
+MAX_BOT_TOKEN = os.environ.get("MAX_BOT_TOKEN")
+MAX_API_BASE_URL = os.environ.get("MAX_API_BASE_URL")
+
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
 
 # "*" или "example.com,foo.trycloudflare.com"
