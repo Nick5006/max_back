@@ -1,0 +1,1392 @@
+openapi: 3.0.3
+info:
+  title: API управления домами и обращениями
+  description: |
+    REST API для взаимодействия жильцов и сотрудников управляющих компаний (УК)
+    с домами, квартирами, обращениями, опросами, уведомлениями и капремонтом.
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:8000
+    description: Dev
+
+tags:
+  - name: Auth
+  - name: User
+  - name: UK
+  - name: Polls
+  - name: Notifications
+  - name: CapitalRepair
+
+security:
+  - cookieAuth: []
+
+paths:
+
+  # ---------- AUTH ----------
+
+  /api/v1/login:
+    post:
+      tags: [Auth]
+      summary: Вход или регистрация (юзер или сотрудник УК)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/LoginUserRequest'
+                - $ref: '#/components/schemas/LoginUKRequest'
+      responses:
+        '200':
+          description: Успех (или пользователь уже существует)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LoginUserResponse'
+                  - $ref: '#/components/schemas/LoginUKResponse'
+                  - $ref: '#/components/schemas/LoginExistingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ---------- USER: PROFILE ----------
+
+  /api/v1/me:
+    get:
+      tags: [User]
+      summary: Профиль текущего пользователя + квартиры
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------- USER: APARTMENTS ----------
+
+  /api/v1/user/apartments:
+    get:
+      tags: [User]
+      summary: Список квартир текущего пользователя
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apartments:
+                    type: array
+                    items: { $ref: '#/components/schemas/UserApartment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    post:
+      tags: [User]
+      summary: Добавить существующую квартиру пользователю
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domik_id, number]
+              properties:
+                domik_id: { type: string, format: uuid }
+                number: { type: string }
+      responses:
+        '201':
+          description: Квартира добавлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserApartmentCreateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Квартира не найдена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409':
+          description: Квартира уже добавлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+
+  # ---------- USER: APPEALS ----------
+
+  /api/v1/user/appeals:
+    get:
+      tags: [User]
+      summary: Список обращений текущего пользователя
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appeals:
+                    type: array
+                    items: { $ref: '#/components/schemas/AppealListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [User]
+      summary: Создать обращение
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apartment_id, title, description]
+              properties:
+                apartment_id: { type: string, format: uuid }
+                title: { type: string, maxLength: 200 }
+                description: { type: string }
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppealCreateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/user/appeals/{id}:
+    get:
+      tags: [User]
+      summary: Детали обращения + история
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppealDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # ---------- USER: POLLS ----------
+
+  /api/v1/user/polls:
+    get:
+      tags: [Polls]
+      summary: Опросы по домам пользователя
+      parameters:
+        - { name: domik_id, in: query, schema: { type: string, format: uuid } }
+        - { name: active, in: query, schema: { type: string, enum: ['1'] } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  polls:
+                    type: array
+                    items: { $ref: '#/components/schemas/Poll' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/user/polls/{id}:
+    get:
+      tags: [Polls]
+      summary: Детали опроса
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Poll' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/user/polls/{id}/vote:
+    post:
+      tags: [Polls]
+      summary: Проголосовать или сменить голос
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [choice_id]
+              properties:
+                choice_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Голос обновлён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VoteResponse' }
+        '201':
+          description: Голос создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VoteResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: УК не голосует
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/user/polls/{id}/results:
+    get:
+      tags: [Polls]
+      summary: Результаты опроса
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PollResults' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------- USER: NOTIFICATIONS ----------
+
+  /api/v1/user/notifications:
+    get:
+      tags: [Notifications]
+      summary: Уведомления по домам пользователя
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: '#/components/schemas/UserNotificationListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/user/notifications/{id}:
+    get:
+      tags: [Notifications]
+      summary: Детали уведомления (юзер)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserNotificationDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------- USER: CAPITAL REPAIR ----------
+
+  /api/v1/user/domik/{domik_id}/capital-repair:
+    get:
+      tags: [CapitalRepair]
+      summary: Капремонт по дому (для жильца)
+      parameters:
+        - { name: domik_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapitalRepairEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Нет доступа к этому дому
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+
+  # ---------- UK: DOMIKS ----------
+
+  /api/v1/uk/domiks:
+    get:
+      tags: [UK]
+      summary: Список домов УК
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domiks:
+                    type: array
+                    items: { $ref: '#/components/schemas/DomikListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    post:
+      tags: [UK]
+      summary: Создать дом + квартиры
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, apartments]
+              properties:
+                address: { type: string }
+                fias_id: { type: string }
+                apartments:
+                  type: object
+                  required: [from, to]
+                  properties:
+                    from: { type: integer, minimum: 1 }
+                    to:   { type: integer }
+                    entrance: { type: string }
+      responses:
+        '201':
+          description: Дом создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomikCreateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/uk/domiks/{id}:
+    get:
+      tags: [UK]
+      summary: Детали дома + квартиры
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomikDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [UK]
+      summary: Удалить дом (каскадно)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # ---------- UK: APARTMENTS ----------
+
+  /api/v1/uk/domiks/{id}/apartments:
+    get:
+      tags: [UK]
+      summary: Список квартир дома
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domik_id: { type: string, format: uuid }
+                  address: { type: string }
+                  apartments:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApartmentShort' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [UK]
+      summary: Создать квартиру в доме
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [number]
+              properties:
+                number: { type: string }
+                entrance: { type: string }
+      responses:
+        '201':
+          description: Квартира создана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApartmentShort' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/uk/domiks/{id}/apartments/{apartment_id}:
+    get:
+      tags: [UK]
+      summary: Детали квартиры + жильцы
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: apartment_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApartmentDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [UK]
+      summary: Изменить квартиру
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: apartment_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                number: { type: string }
+                entrance: { type: string }
+      responses:
+        '200':
+          description: Обновлено
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApartmentUpdateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [UK]
+      summary: Удалить квартиру
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: apartment_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ---------- UK: APPEALS ----------
+
+  /api/v1/uk/appeals:
+    get:
+      tags: [UK]
+      summary: Все обращения по домам УК
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [new, in_progress, done, rejected] } }
+        - { name: domik_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appeals:
+                    type: array
+                    items: { $ref: '#/components/schemas/UKAppealListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/uk/appeals/{id}/status:
+    post:
+      tags: [UK]
+      summary: Обновить статус обращения
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [new, in_progress, done, rejected] }
+                text: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppealStatusUpdateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # ---------- UK: POLLS ----------
+
+  /api/v1/uk/polls:
+    get:
+      tags: [UK, Polls]
+      summary: Список опросов по домам УК
+      parameters:
+        - { name: domik_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  polls:
+                    type: array
+                    items: { $ref: '#/components/schemas/Poll' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    post:
+      tags: [UK, Polls]
+      summary: Создать опрос
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domik_id, title, choices]
+              properties:
+                domik_id: { type: string, format: uuid }
+                title: { type: string }
+                description: { type: string }
+                choices:
+                  type: array
+                  minItems: 2
+                  items:
+                    oneOf:
+                      - { type: string }
+                      - type: object
+                        properties:
+                          text: { type: string }
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Poll' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/uk/polls/{id}/close:
+    post:
+      tags: [UK, Polls]
+      summary: Закрыть опрос
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  poll_id: { type: string, format: uuid }
+                  is_active: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/uk/polls/{id}:
+    delete:
+      tags: [UK, Polls]
+      summary: Удалить опрос
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # ---------- UK: NOTIFICATIONS ----------
+
+  /api/v1/uk/notifications:
+    get:
+      tags: [UK, Notifications]
+      summary: Список уведомлений домов УК
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: '#/components/schemas/UKNotificationListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    post:
+      tags: [UK, Notifications]
+      summary: Создать уведомление
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domik_id, title, text]
+              properties:
+                domik_id: { type: string, format: uuid }
+                title: { type: string, maxLength: 200 }
+                text: { type: string }
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UKNotificationCreateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/uk/notifications/{id}:
+    get:
+      tags: [UK, Notifications]
+      summary: Детали уведомления (УК)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UKNotificationDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------- UK: CAPITAL REPAIR ----------
+
+  /api/v1/uk/domiks/{id}/capital-repair:
+    get:
+      tags: [UK, CapitalRepair]
+      summary: Капремонт дома (УК)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapitalRepairEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [UK, CapitalRepair]
+      summary: Создать счёт капремонта
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tariff_per_sqm: { type: string }
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  capital_repair: { $ref: '#/components/schemas/CapitalRepair' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    patch:
+      tags: [UK, CapitalRepair]
+      summary: Обновить показатели капремонта
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tariff_per_sqm: { type: string }
+                collected_total: { type: string }
+                spent_total: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  capital_repair: { $ref: '#/components/schemas/CapitalRepair' }
+                  updated_fields:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/uk/domiks/{id}/capital-repair/works:
+    get:
+      tags: [UK, CapitalRepair]
+      summary: Программа работ
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  works:
+                    type: array
+                    items: { $ref: '#/components/schemas/CapitalRepairWork' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [UK, CapitalRepair]
+      summary: Добавить работу
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [work_type, planned_year]
+              properties:
+                work_type: { type: string }
+                planned_year: { type: integer, minimum: 1900, maximum: 2200 }
+                status: { type: string, enum: [planned, in_progress, done] }
+                cost: { type: string, nullable: true }
+                contractor: { type: string }
+                description: { type: string }
+                completed_at: { type: string, format: date, nullable: true }
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  work: { $ref: '#/components/schemas/CapitalRepairWork' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/v1/uk/domiks/{id}/capital-repair/works/{work_id}:
+    patch:
+      tags: [UK, CapitalRepair]
+      summary: Изменить работу
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: work_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                work_type: { type: string }
+                planned_year: { type: integer }
+                status: { type: string, enum: [planned, in_progress, done] }
+                cost: { type: string, nullable: true }
+                contractor: { type: string }
+                description: { type: string }
+                completed_at: { type: string, format: date, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  work: { $ref: '#/components/schemas/CapitalRepairWork' }
+                  updated_fields:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    delete:
+      tags: [UK, CapitalRepair]
+      summary: Удалить работу
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: work_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+components:
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+
+  responses:
+    BadRequest:
+      description: Ошибка в данных / некорректный JSON
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Status' }
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Status' }
+    Forbidden:
+      description: Нет прав
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Status' }
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Status' }
+    MethodNotAllowed:
+      description: Метод не разрешён
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Status' }
+    Conflict:
+      description: Конфликт
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Status' }
+
+  schemas:
+
+    Status:
+      type: object
+      properties:
+        status: { type: string }
+
+    ManagementOrg:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+
+    ManagementOrgWithInn:
+      allOf:
+        - $ref: '#/components/schemas/ManagementOrg'
+        - type: object
+          properties:
+            inn: { type: string }
+
+    # --------- AUTH ---------
+
+    LoginUserRequest:
+      type: object
+      required: [max_id, name]
+      properties:
+        max_id: { type: string }
+        name:   { type: string }
+
+    LoginUKRequest:
+      type: object
+      required: [max_id, name, is_jk, management_org]
+      properties:
+        max_id: { type: string }
+        name:   { type: string }
+        is_jk:  { type: boolean, enum: [true] }
+        management_org:
+          type: object
+          required: [name, inn]
+          properties:
+            name: { type: string }
+            inn:  { type: string }
+
+    LoginUserResponse:
+      type: object
+      properties:
+        status: { type: string }
+        id: { type: string, format: uuid }
+        is_jk: { type: boolean }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrgWithInn' }] }
+
+    LoginUKResponse:
+      type: object
+      properties:
+        status: { type: string }
+        id: { type: string, format: uuid }
+        is_jk: { type: boolean }
+        management_org: { $ref: '#/components/schemas/ManagementOrgWithInn' }
+
+    LoginExistingResponse:
+      type: object
+      properties:
+        status: { type: string, example: "Такой пользователь уже существует" }
+        id: { type: string, format: uuid }
+        is_jk: { type: boolean }
+
+    # --------- USER PROFILE ---------
+
+    UserApartment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        entrance: { type: string }
+        domik_id: { type: string, format: uuid }
+        domik_address: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        role: { type: string, enum: [resident, owner, chair] }
+        role_display: { type: string }
+        is_primary: { type: boolean }
+
+    MeResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        max_id: { type: string }
+        name: { type: string }
+        last_name: { type: string }
+        is_jk: { type: boolean }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        apartments:
+          type: array
+          items: { $ref: '#/components/schemas/UserApartment' }
+
+    UserApartmentCreateResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        domik_id: { type: string, format: uuid }
+        role: { type: string, enum: [resident, owner, chair] }
+        is_primary: { type: boolean }
+
+    # --------- APPEALS ---------
+
+    AppealListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [new, in_progress, done, rejected] }
+        created_at: { type: string, format: date-time }
+        apartment_id: { type: string, format: uuid }
+        apartment_number: { type: string }
+        domik_id: { type: string, format: uuid }
+        domik_address: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+
+    AppealCreateResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+
+    AppealDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        status: { type: string }
+        status_display: { type: string }
+        domik:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            address: { type: string }
+            management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        apartment:
+          nullable: true
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            number: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              status_display: { type: string }
+              text: { type: string }
+              changed_by: { type: string, nullable: true }
+              changed_at: { type: string, format: date-time }
+
+    UKAppealListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string }
+        status_display: { type: string }
+        author:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            last_name: { type: string }
+        domik_id: { type: string, format: uuid }
+        domik_address: { type: string }
+        apartment_number: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AppealStatusUpdateResponse:
+      type: object
+      properties:
+        status: { type: string }
+        appeal_id: { type: string, format: uuid }
+        new_status: { type: string }
+        status_display: { type: string }
+
+    # --------- POLLS ---------
+
+    PollChoice:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        text: { type: string }
+        order: { type: integer }
+        votes_count: { type: integer }
+        is_user_choice: { type: boolean }
+
+    Poll:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        author:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            last_name: { type: string }
+        domik:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            address: { type: string }
+        total_votes: { type: integer }
+        choices:
+          type: array
+          items: { $ref: '#/components/schemas/PollChoice' }
+        user_voted: { type: boolean }
+        user_choice_id: { type: string, format: uuid, nullable: true }
+
+    PollResults:
+      type: object
+      properties:
+        poll_id: { type: string, format: uuid }
+        title: { type: string }
+        total_votes: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              text: { type: string }
+              votes_count: { type: integer }
+              percent: { type: number, format: float }
+
+    VoteResponse:
+      type: object
+      properties:
+        status: { type: string }
+        created: { type: boolean }
+        poll_id: { type: string, format: uuid }
+        choice_id: { type: string, format: uuid }
+        total_votes: { type: integer }
+
+    # --------- NOTIFICATIONS ---------
+
+    UserNotificationListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        text: { type: string }
+        created_at: { type: string, format: date-time }
+        domik:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            address: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+
+    UserNotificationDetail:
+      allOf:
+        - $ref: '#/components/schemas/UserNotificationListItem'
+        - type: object
+          properties:
+            created_by:
+              nullable: true
+              type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string }
+
+    UKNotificationListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        text: { type: string }
+        created_at: { type: string, format: date-time }
+        domik:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            address: { type: string }
+        created_by:
+          nullable: true
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+
+    UKNotificationDetail:
+      $ref: '#/components/schemas/UKNotificationListItem'
+
+    UKNotificationCreateResponse:
+      type: object
+      properties:
+        status: { type: string }
+        notification:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string }
+            text: { type: string }
+            created_at: { type: string, format: date-time }
+            domik:
+              type: object
+              properties:
+                id: { type: string, format: uuid }
+                address: { type: string }
+
+    # --------- DOMIKS & APARTMENTS ---------
+
+    DomikListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        address: { type: string }
+        fias_id: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        apartments_count: { type: integer }
+        appeals_count: { type: integer }
+        new_appeals_count: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    DomikCreateResponse:
+      type: object
+      properties:
+        status: { type: string }
+        domik_id: { type: string, format: uuid }
+        address: { type: string }
+        management_org: { $ref: '#/components/schemas/ManagementOrg' }
+        apartments_created: { type: integer }
+
+    ApartmentShort:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        entrance: { type: string }
+        residents_count: { type: integer }
+
+    DomikDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        address: { type: string }
+        fias_id: { type: string }
+        management_org: { nullable: true, allOf: [{ $ref: '#/components/schemas/ManagementOrg' }] }
+        created_at: { type: string, format: date-time }
+        apartments:
+          type: array
+          items: { $ref: '#/components/schemas/ApartmentShort' }
+
+    ApartmentDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        entrance: { type: string }
+        domik_id: { type: string, format: uuid }
+        domik_address: { type: string }
+        residents:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string, format: uuid }
+              max_id: { type: string }
+              name: { type: string }
+              last_name: { type: string }
+              role: { type: string }
+              role_display: { type: string }
+              is_primary: { type: boolean }
+        appeals_count: { type: integer }
+
+    ApartmentUpdateResponse:
+      type: object
+      properties:
+        status: { type: string }
+        id: { type: string, format: uuid }
+        number: { type: string }
+        entrance: { type: string }
+        updated_fields:
+          type: array
+          items: { type: string }
+
+    # --------- CAPITAL REPAIR ---------
+
+    CapitalRepair:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        domik_id: { type: string, format: uuid }
+        tariff_per_sqm: { type: string }
+        collected_total: { type: string }
+        spent_total: { type: string }
+        balance: { type: string }
+        updated_at: { type: string, format: date-time }
+
+    CapitalRepairWork:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        work_type: { type: string }
+        planned_year: { type: integer }
+        status: { type: string, enum: [planned, in_progress, done] }
+        status_display: { type: string }
+        cost: { type: string, nullable: true }
+        contractor: { type: string }
+        description: { type: string }
+        completed_at: { type: string, format: date, nullable: true }
+
+    CapitalRepairEnvelope:
+      type: object
+      properties:
+        domik:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            address: { type: string }
+        capital_repair:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/CapitalRepair' }]
+        works:
+          type: array
+          items: { $ref: '#/components/schemas/CapitalRepairWork' }
+        status: { type: string }
