@@ -10,12 +10,12 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      SECRET_KEY: "change-me-to-a-random-50-char-string"
+      SECRET_KEY: "${SECRET_KEY}"
       DJANGO_DEBUG: "0"
       ALLOWED_HOSTS: "*"
       DB_PATH: "/app/data/db.sqlite3"
       CORS_ALLOWED_ORIGINS: "https://forge.etsi.org"
-      CSRF_TRUSTED_ORIGINS: "https://*.trycloudflare.com"
+      CSRF_TRUSTED_ORIGINS: "https://*.cloudpub.ru,https://*.trycloudflare.com"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/admin/login/"]
@@ -24,10 +24,12 @@ services:
       retries: 3
       start_period: 20s
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    container_name: apihandler-tunnel
-    command: tunnel --no-autoupdate --url http://web:8000
+  cloudpub:
+    image: cloudpub/cloudpub:latest
+    container_name: apihandler-cloudpub
+    command: publish http web:8000
+    environment:
+      TOKEN: "${CLOUDPUB_TOKEN}"
     depends_on:
       web:
         condition: service_healthy
