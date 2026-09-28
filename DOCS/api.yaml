@@ -4,7 +4,10 @@ info:
   description: |
     REST API для взаимодействия жильцов и сотрудников управляющих компаний (УК)
     с домами, квартирами, обращениями, опросами, уведомлениями и капремонтом.
-  version: 1.2.0
+
+    Привязка и отвязка жильца к квартире — по одноразовым кодам доступа,
+    которые генерирует УК.
+  version: 1.3.0
 servers:
   - url: http://127.0.0.1:8000
     description: Dev
@@ -119,10 +122,10 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     post:
       tags: [User]
-      summary: Добавить квартиру по коду доступа
+      summary: Привязать квартиру по коду (bind)
       description: |
         Код генерирует УК через `POST /uk/domiks/<id>/apartments/<apartment_id>/generate-key`
-        и передаёт жильцу. После успешной привязки код удаляется.
+        с `purpose=bind` и передаёт жильцу. После успешной привязки код удаляется.
       requestBody:
         required: true
         content:
@@ -143,7 +146,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
-          description: Неверный код или код не сгенерирован
+          description: Неверный bind-код или код не сгенерирован
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Status' }
@@ -155,6 +158,44 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '409':
           description: Квартира уже добавлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+
+  /api/v1/user/apartments/{apartment_id}/delete:
+    delete:
+      tags: [User]
+      summary: Отвязать квартиру по коду (unbind)
+      description: |
+        Код генерирует УК через `POST /uk/domiks/<id>/apartments/<apartment_id>/generate-key`
+        с `purpose=unbind`. После успешной отвязки код удаляется.
+        Если отвязывается основная квартира и есть другие — одна из них становится основной.
+      parameters:
+        - { name: apartment_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: code
+          in: query
+          required: true
+          description: 10-значный код отвязки
+          schema: { type: string, minLength: 10, maxLength: 10 }
+      responses:
+        '200':
+          description: Квартира отвязана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '400':
+          description: Не передан код
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Неверный unbind-код или код не сгенерирован
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '404':
+          description: Квартира не найдена
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Status' }
@@ -561,15 +602,28 @@ paths:
   /api/v1/uk/domiks/{id}/apartments/{apartment_id}/generate-key:
     post:
       tags: [UK]
-      summary: Сгенерировать код доступа к квартире
+      summary: Сгенерировать код доступа к квартире (bind / unbind)
       description: |
-        Генерирует 10-значный цифровой код, который УК передаёт жильцу.
-        Жилец вводит код в `POST /user/apartments` и получает привязку.
-        Код одноразовый — удаляется после успешной привязки.
-        Повторный вызов перезаписывает существующий код.
+        Генерирует 10-значный цифровой код. `purpose=bind` — для привязки
+        (используется в `POST /user/apartments`), `purpose=unbind` — для отвязки
+        (используется в `DELETE /user/apartments/{apartment_id}/delete`).
+        Код одноразовый — удаляется после успешного использования.
+        Повторный вызов для того же purpose перезаписывает существующий код.
+        На квартиру может быть один bind-код и один unbind-код одновременно.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: apartment_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                purpose:
+                  type: string
+                  enum: [bind, unbind]
+                  default: bind
       responses:
         '200':
           description: Код перезаписан
@@ -581,6 +635,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApartmentKeyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1155,6 +1210,7 @@ components:
         status: { type: string }
         apartment_id: { type: string, format: uuid }
         apartment_number: { type: string }
+        purpose: { type: string, enum: [bind, unbind] }
         code: { type: string, minLength: 10, maxLength: 10 }
         created_at: { type: string, format: date-time }
 

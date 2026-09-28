@@ -348,7 +348,10 @@ def create_apartment(request):
     if apartment is None:
         return JsonResponse({"status": "Квартира не найдена"}, status=404)
 
-    access_key = ApartmentKey.objects.filter(apartment=apartment).first()
+    access_key = ApartmentKey.objects.filter(
+        apartment=apartment,
+        purpose=ApartmentKey.Purpose.BIND,
+    ).first()
     if access_key is None:
         return JsonResponse(
             {"status": "Для этой квартиры не сгенерирован код доступа"},
@@ -1936,10 +1939,22 @@ def uk_generate_ap_key_view(request, domik_id, apartment_id):
     if apartment is None:
         return JsonResponse({"status": "Квартира не найдена"}, status=404)
 
+    data, error = parse_json(request)
+    if error:
+        return error
+
+    purpose = (data.get("purpose") or ApartmentKey.Purpose.BIND).strip()
+    if purpose not in dict(ApartmentKey.Purpose.choices):
+        return JsonResponse({
+            "status": "Некорректный purpose",
+            "allowed": list(dict(ApartmentKey.Purpose.choices).keys()),
+        }, status=400)
+
     code = "".join(secrets.choice("0123456789") for _ in range(10))
 
     key, created = ApartmentKey.objects.update_or_create(
         apartment=apartment,
+        purpose=purpose,
         defaults={"code": code, "created_by": request.user},
     )
 
@@ -1947,6 +1962,52 @@ def uk_generate_ap_key_view(request, domik_id, apartment_id):
         "status": "ok",
         "apartment_id": str(apartment.id),
         "apartment_number": apartment.number,
+        "purpose": key.purpose,
         "code": key.code,
         "created_at": key.created_at,
     }, status=201 if created else 200)
+
+@csrf_exempt
+@api_login_required
+def user_apartment_delete_view(request, apartment_id):
+    if request.method != "DELETE":
+        return JsonResponse({"status": "Method not allowed"}, status=405)
+
+    code = (request.GET.get("code") or "").strip()
+    if not code:
+        return JsonResponse({"status": "Поле code обязательно"}, status=400)
+
+    ua = UserApartment.objects.filter(
+        user=request.user,
+        apartment_id=apartment_id,
+    ).first()
+
+    if ua is None:
+        return JsonResponse({"status": "Квартира не найдена"}, status=404)
+
+    unbind_key = ApartmentKey.objects.filter(
+        apartment=ua.apartment,
+        purpose=ApartmentKey.Purpose.UNBIND,
+    ).first()
+    if unbind_key is None:
+        return JsonResponse(
+            {"status": "Для этой квартиры не сгенерирован код отвязки"},
+            status=403,
+        )
+
+    if unbind_key.code != code:
+        return JsonResponse({"status": "Неверный код доступа"}, status=403)
+
+    was_primary = ua.is_primary
+
+    with transaction.atomic():
+        ua.delete()
+        unbind_key.delete()
+
+        if was_primary:
+            new_primary = UserApartment.objects.filter(user=request.user).first()
+            if new_primary:
+                new_primary.is_primary = True
+                new_primary.save(update_fields=["is_primary"])
+
+    return JsonResponse({"status": "ok"}, status=200)

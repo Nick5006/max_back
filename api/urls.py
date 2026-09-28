@@ -28,7 +28,7 @@ from apihandler.views import (
     uk_notifications_view, notifications_view, user_notification_detail_view, uk_notification_detail_view,
     uk_apartments_view, uk_apartment_detail_view, user_capital_repair_view, uk_capital_repair_view,
     uk_capital_repair_works_view, uk_capital_repair_work_detail_view, search_domiks_view, uk_appeal_detail_view,
-    uk_generate_ap_key_view,
+    uk_generate_ap_key_view, user_apartment_delete_view
 )
 
 urlpatterns = [
@@ -37,6 +37,7 @@ urlpatterns = [
     path('api/v1/me', me_view),
     path('api/v1/domiks', search_domiks_view),
     path('api/v1/user/apartments', apartments_view),
+    path('api/v1/user/apartments/<uuid:apartment_id>/delete', user_apartment_delete_view),
     path('api/v1/user/appeals', appeals_view),
     path('api/v1/user/appeals/<uuid:appeal_id>', appeal_detail_view),
     path('api/v1/user/polls', polls_view),

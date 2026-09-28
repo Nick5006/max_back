@@ -29,7 +29,8 @@
 | GET | `/api/v1/me` | user | Профиль + квартиры |
 | GET | `/api/v1/domiks` | auth | Поиск домов по адресу |
 | GET | `/api/v1/user/apartments` | user | Список квартир |
-| POST | `/api/v1/user/apartments` | user | Добавить квартиру по коду доступа |
+| POST | `/api/v1/user/apartments` | user | Привязать квартиру по коду (bind) |
+| DELETE | `/api/v1/user/apartments/<apartment_id>/delete` | user | Отвязать квартиру по коду (unbind) |
 | GET | `/api/v1/user/appeals` | user | Список своих обращений |
 | POST | `/api/v1/user/appeals` | user | Создать обращение |
 | GET | `/api/v1/user/appeals/<id>` | user | Детали обращения + история |
@@ -49,7 +50,7 @@
 | GET | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>` | uk | Детали квартиры + жильцы |
 | PATCH | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>` | uk | Изменить квартиру |
 | DELETE | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>` | uk | Удалить квартиру |
-| POST | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key` | uk | Сгенерировать код доступа к квартире |
+| POST | `/api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key` | uk | Сгенерировать код доступа (bind / unbind) |
 | GET | `/api/v1/uk/appeals` | uk | Все обращения по домам УК |
 | GET | `/api/v1/uk/appeals/<id>` | uk | Детали обращения + история (УК) |
 | POST | `/api/v1/uk/appeals/<id>/status` | uk | Обновить статус обращения |
@@ -296,8 +297,8 @@
 
 ## POST /api/v1/user/apartments
 
-Добавить квартиру пользователю по коду доступа.  
-Код генерирует УК через `POST /api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key` и передаёт жильцу.  
+Привязать квартиру к пользователю по **коду привязки** (`purpose=bind`).  
+Код генерирует УК через `POST /api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key` с `purpose=bind` и передаёт жильцу.  
 После успешной привязки код **удаляется** (одноразовый).  
 Первая добавленная квартира автоматически становится основной (`is_primary = true`).
 
@@ -330,7 +331,7 @@
 { "status": "Поля domik_id, number и code обязательны" }
 ```
 
-**403 (неверный или отсутствующий код):**
+**403 (неверный или отсутствующий bind-код):**
 ```json
 { "status": "Неверный код доступа" }
 { "status": "Для этой квартиры не сгенерирован код доступа" }
@@ -349,6 +350,47 @@
 **405:**
 ```json
 { "status": "Method not allowed" }
+```
+
+---
+
+## DELETE /api/v1/user/apartments/<apartment_id>/delete
+
+Отвязать квартиру от текущего пользователя по **коду отвязки** (`purpose=unbind`).  
+Код генерирует УК через `POST /api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key` с `purpose=unbind`.  
+После успешной отвязки код **удаляется** (одноразовый).  
+Если отвязали основную квартиру и есть другие — одна из них становится основной.
+
+**Auth:** да.
+
+**Query-параметры:**
+- `code` — 10-значный код отвязки (обязательный).
+
+**Пример запроса:**
+```
+DELETE /api/v1/user/apartments/a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d/delete?code=4829175036
+```
+
+**200:**
+```json
+{ "status": "ok" }
+```
+
+**400:**
+```json
+{ "status": "Поле code обязательно" }
+{ "status": "Method not allowed" }
+```
+
+**403 (неверный или отсутствующий unbind-код):**
+```json
+{ "status": "Неверный код доступа" }
+{ "status": "Для этой квартиры не сгенерирован код отвязки" }
+```
+
+**404:**
+```json
+{ "status": "Квартира не найдена" }
 ```
 
 ---
@@ -1500,11 +1542,11 @@
 Каскадно удаляются:
 - все квартиры дома (`Apartment`),
 - привязки жильцов (`UserApartment`),
+- коды доступа к квартирам (`ApartmentKey`),
 - все обращения по дому (`Appeal`) и их история (`AppealHistory`),
 - все опросы по дому (`Poll`) с вариантами (`Choice`) и голосами (`Vote`),
 - уведомления дома (`Notification`),
-- счёт капремонта (`CapitalRepair`) и его работы (`CapitalRepairWork`),
-- коды доступа к квартирам (`ApartmentKey`).
+- счёт капремонта (`CapitalRepair`) и его работы (`CapitalRepairWork`).
 
 Доступ — только если дом принадлежит УК текущего сотрудника.
 
@@ -1731,27 +1773,49 @@
 ## POST /api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key
 
 Сгенерировать код доступа к квартире.  
-УК передаёт этот код жильцу, жилец вводит его в `POST /api/v1/user/apartments` и получает привязку к квартире.  
-Код **одноразовый** — удаляется после успешной привязки.  
-Повторный вызов ручки для той же квартиры перезаписывает существующий код (старый перестаёт работать).
+Код передаётся жильцу:
+- `purpose=bind` — жилец вводит код в `POST /api/v1/user/apartments`, чтобы привязаться;
+- `purpose=unbind` — жилец вводит код в `DELETE /api/v1/user/apartments/<apartment_id>/delete`, чтобы отвязаться.
+
+Код **одноразовый** — удаляется после успешного использования.  
+Повторный вызов ручки для той же квартиры и того же `purpose` перезаписывает существующий код (старый перестаёт работать).  
+Одновременно на квартиру может быть один `bind`-код и один `unbind`-код — они независимы.
 
 **Auth:** да, сотрудник УК.  
 **Только POST.**
 
 **Код** — 10 цифр (`secrets.choice("0123456789")`).
 
-**200 (если код уже был и перезаписан):**
+**Фронт кидает (опционально; если не указать — по умолчанию `bind`):**
+```json
+{ "purpose": "bind" }
+```
+
+или:
+```json
+{ "purpose": "unbind" }
+```
+
+**200 (если код для этого purpose уже был и перезаписан):**
 ```json
 {
   "status": "ok",
   "apartment_id": "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
   "apartment_number": "42",
+  "purpose": "bind",
   "code": "4829175036",
   "created_at": "2026-09-28T10:00:00Z"
 }
 ```
 
 **201 (если код создан впервые):** то же тело.
+
+**400:**
+```json
+{ "status": "Некорректный purpose", "allowed": ["bind", "unbind"] }
+{ "status": "Некорректный JSON" }
+{ "status": "Тело запроса должно быть JSON-объектом" }
+```
 
 **404:**
 ```json
@@ -1977,14 +2041,15 @@
 
 ## Модель `ApartmentKey`
 
-Одноразовый код доступа к квартире. Создаётся УК через `POST /api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key`. Используется жильцом в `POST /api/v1/user/apartments`. Удаляется после успешной привязки.
+Одноразовый код доступа к квартире. Создаётся УК через `POST /api/v1/uk/domiks/<id>/apartments/<apartment_id>/generate-key`. Используется жильцом в `POST /api/v1/user/apartments` (bind) или `DELETE /api/v1/user/apartments/<apartment_id>/delete` (unbind). Удаляется после успешного использования.
 
 | Поле | Тип | Описание |
 |---|---|---|
 | `id` | UUID | Первичный ключ |
-| `apartment` | OneToOne → Apartment | Квартира, к которой привязан код |
+| `apartment` | FK → Apartment | Квартира, к которой привязан код |
 | `code` | CharField(10) | 10-значный цифровой код |
+| `purpose` | CharField(10) | `bind` (привязка) или `unbind` (отвязка) |
 | `created_by` | FK → User, null | Кто сгенерировал код |
 | `created_at` | DateTime | Когда код создан |
 
-Один активный код на квартиру. Перегенерация перезаписывает.
+Ограничение `unique_together = ("apartment", "purpose")` — на квартиру один `bind`-код и один `unbind`-код. Перегенерация для того же purpose перезаписывает.
