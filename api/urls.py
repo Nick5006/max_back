@@ -28,6 +28,7 @@ from apihandler.views import (
     uk_notifications_view, notifications_view, user_notification_detail_view, uk_notification_detail_view,
     uk_apartments_view, uk_apartment_detail_view, user_capital_repair_view, uk_capital_repair_view,
     uk_capital_repair_works_view, uk_capital_repair_work_detail_view, search_domiks_view, uk_appeal_detail_view,
+    uk_generate_ap_key_view,
 )
 
 urlpatterns = [
@@ -56,6 +57,7 @@ urlpatterns = [
     path('api/v1/uk/polls/<uuid:poll_id>', uk_poll_delete_view),
     path('api/v1/uk/domiks/<uuid:domik_id>/apartments', uk_apartments_view),
     path('api/v1/uk/domiks/<uuid:domik_id>/apartments/<uuid:apartment_id>', uk_apartment_detail_view),
+    path('api/v1/uk/domiks/<uuid:domik_id>/apartments/<uuid:apartment_id>/generate-key', uk_generate_ap_key_view),
     path('api/v1/user/domik/<uuid:domik_id>/capital-repair', user_capital_repair_view),
     path('api/v1/uk/domiks/<uuid:domik_id>/capital-repair', uk_capital_repair_view),
     path('api/v1/uk/domiks/<uuid:domik_id>/capital-repair/works', uk_capital_repair_works_view),

@@ -4,7 +4,7 @@ info:
   description: |
     REST API для взаимодействия жильцов и сотрудников управляющих компаний (УК)
     с домами, квартирами, обращениями, опросами, уведомлениями и капремонтом.
-  version: 1.1.0
+  version: 1.2.0
 servers:
   - url: http://127.0.0.1:8000
     description: Dev
@@ -119,17 +119,21 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     post:
       tags: [User]
-      summary: Добавить существующую квартиру пользователю
+      summary: Добавить квартиру по коду доступа
+      description: |
+        Код генерирует УК через `POST /uk/domiks/<id>/apartments/<apartment_id>/generate-key`
+        и передаёт жильцу. После успешной привязки код удаляется.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [domik_id, number]
+              required: [domik_id, number, code]
               properties:
                 domik_id: { type: string, format: uuid }
                 number: { type: string }
+                code: { type: string, minLength: 10, maxLength: 10 }
       responses:
         '201':
           description: Квартира добавлена
@@ -138,6 +142,11 @@ paths:
               schema: { $ref: '#/components/schemas/UserApartmentCreateResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Неверный код или код не сгенерирован
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
         '404':
           description: Квартира не найдена
           content:
@@ -548,6 +557,34 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/uk/domiks/{id}/apartments/{apartment_id}/generate-key:
+    post:
+      tags: [UK]
+      summary: Сгенерировать код доступа к квартире
+      description: |
+        Генерирует 10-значный цифровой код, который УК передаёт жильцу.
+        Жилец вводит код в `POST /user/apartments` и получает привязку.
+        Код одноразовый — удаляется после успешной привязки.
+        Повторный вызов перезаписывает существующий код.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: apartment_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Код перезаписан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApartmentKeyResponse' }
+        '201':
+          description: Код создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApartmentKeyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   # ---------- UK: APPEALS ----------
 
@@ -1109,6 +1146,17 @@ components:
         domik_id: { type: string, format: uuid }
         role: { type: string, enum: [resident, owner, chair] }
         is_primary: { type: boolean }
+
+    # --------- APARTMENT KEY ---------
+
+    ApartmentKeyResponse:
+      type: object
+      properties:
+        status: { type: string }
+        apartment_id: { type: string, format: uuid }
+        apartment_number: { type: string }
+        code: { type: string, minLength: 10, maxLength: 10 }
+        created_at: { type: string, format: date-time }
 
     # --------- APPEALS ---------
 

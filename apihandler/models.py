@@ -272,3 +272,17 @@ class CapitalRepairWork(models.Model):
 
     def __str__(self):
         return f"{self.work_type} ({self.planned_year})"
+
+class ApartmentKey(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    apartment = models.OneToOneField(
+        Apartment, on_delete=models.CASCADE, related_name="access_key"
+    )
+    code = models.CharField(max_length=10, db_index=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name="generated_keys"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.apartment} — {self.code}"

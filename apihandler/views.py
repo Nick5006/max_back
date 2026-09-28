@@ -18,10 +18,11 @@ from apihandler.models import (
     Notification,
     CapitalRepairWork,
     CapitalRepair,
+    ApartmentKey,
 )
 from django.db import transaction
 from functools import wraps
-
+import secrets
 from apihandler.serializers.notification import NotificationSerializer
 from apihandler.serializers.poll import get_user_domik_ids, serialize_poll_choice, serialize_poll
 from apihandler.serializers.capital_repair import serialize_capital_repair_work, serialize_capital_repair
@@ -335,17 +336,27 @@ def create_apartment(request):
 
     domik_id = data.get("domik_id")
     number = data.get("number")
+    code = (data.get("code") or "").strip()
 
-    if not domik_id or not number:
+    if not domik_id or not number or not code:
         return JsonResponse(
-            {"status": "Поля domik_id и number обязательны"},
+            {"status": "Поля domik_id, number и code обязательны"},
             status=400,
         )
 
     apartment = Apartment.objects.filter(domik_id=domik_id, number=number).first()
-
     if apartment is None:
         return JsonResponse({"status": "Квартира не найдена"}, status=404)
+
+    access_key = ApartmentKey.objects.filter(apartment=apartment).first()
+    if access_key is None:
+        return JsonResponse(
+            {"status": "Для этой квартиры не сгенерирован код доступа"},
+            status=403,
+        )
+
+    if access_key.code != code:
+        return JsonResponse({"status": "Неверный код доступа"}, status=403)
 
     is_first = not UserApartment.objects.filter(user=request.user).exists()
 
@@ -360,6 +371,7 @@ def create_apartment(request):
 
     if not created:
         return JsonResponse({"status": "Квартира уже добавлена"}, status=409)
+    access_key.delete()
 
     return JsonResponse({
         "id": str(apartment.id),
@@ -1909,3 +1921,32 @@ def uk_appeal_detail_view(request, appeal_id):
             for h in history
         ],
     })
+
+@csrf_exempt
+@require_POST
+@uk_required
+def uk_generate_ap_key_view(request, domik_id, apartment_id):
+    domik = Domik.objects.filter(
+        id=domik_id, management_org=request.user.management_org
+    ).first()
+    if domik is None:
+        return JsonResponse({"status": "Дом не найден или нет доступа"}, status=404)
+
+    apartment = Apartment.objects.filter(id=apartment_id, domik=domik).first()
+    if apartment is None:
+        return JsonResponse({"status": "Квартира не найдена"}, status=404)
+
+    code = "".join(secrets.choice("0123456789") for _ in range(10))
+
+    key, created = ApartmentKey.objects.update_or_create(
+        apartment=apartment,
+        defaults={"code": code, "created_by": request.user},
+    )
+
+    return JsonResponse({
+        "status": "ok",
+        "apartment_id": str(apartment.id),
+        "apartment_number": apartment.number,
+        "code": key.code,
+        "created_at": key.created_at,
+    }, status=201 if created else 200)
