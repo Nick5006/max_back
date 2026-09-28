@@ -15,8 +15,10 @@ from .models import (
     Poll,
     Choice,
     Vote,
+    Notification,
     CapitalRepair,
     CapitalRepairWork,
+    ApartmentKey,
 )
 
 admin.site.site_header = "Панель управления API"
@@ -47,6 +49,11 @@ ROLE_COLORS = {
     UserApartment.Role.CHAIR: "#db2777",
 }
 
+KEY_PURPOSE_COLORS = {
+    "bind": "#16a34a",
+    "unbind": "#dc2626",
+}
+
 
 class AppealStatusFilter(admin.SimpleListFilter):
     title = "статус обращения"
@@ -71,6 +78,19 @@ class RoleFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         if self.value():
             return queryset.filter(role=self.value())
+        return queryset
+
+
+class KeyPurposeFilter(admin.SimpleListFilter):
+    title = "назначение кода"
+    parameter_name = "purpose"
+
+    def lookups(self, request, model_admin):
+        return ApartmentKey.Purpose.choices
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(purpose=self.value())
         return queryset
 
 
@@ -102,6 +122,24 @@ class ResidentInline(admin.TabularInline):
     verbose_name = "Житель / собственник"
     verbose_name_plural = "Жильцы и собственники"
     classes = ("collapse",)
+
+
+class ApartmentKeyInline(admin.TabularInline):
+    model = ApartmentKey
+    extra = 0
+    fields = ("purpose_badge", "code", "created_by", "created_at")
+    readonly_fields = ("purpose_badge", "code", "created_by", "created_at")
+    can_delete = False
+    verbose_name = "Код доступа"
+    verbose_name_plural = "Активные коды доступа"
+    classes = ("collapse",)
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Назначение")
+    def purpose_badge(self, obj):
+        return badge(obj.get_purpose_display(), KEY_PURPOSE_COLORS.get(obj.purpose, "#64748b"))
 
 
 class AppealHistoryInline(admin.TabularInline):
@@ -153,6 +191,15 @@ class ChoiceInline(admin.TabularInline):
         if obj.pk is None:
             return "—"
         return badge(str(obj.votes.count()), "#0ea5e9")
+
+
+class CapitalRepairWorkInline(admin.TabularInline):
+    model = CapitalRepairWork
+    extra = 0
+    fields = ("work_type", "planned_year", "status", "cost", "contractor")
+    verbose_name = "Работа"
+    verbose_name_plural = "Программа работ"
+    classes = ("collapse",)
 
 
 class PollAdmin(admin.ModelAdmin):
@@ -231,7 +278,7 @@ class VoteAdmin(admin.ModelAdmin):
         "choice__text",
         "user__max_id", "user__name",
     )
-    autocomplete_fields = ("poll", "user")   # ← убрали "choice"
+    autocomplete_fields = ("poll", "user")
     ordering = ("-created_at",)
     readonly_fields = ("id", "created_at")
     list_per_page = 50
@@ -254,6 +301,7 @@ class VoteAdmin(admin.ModelAdmin):
         return format_html(
             '<a href="{}">{} {}</a>', url, obj.user.name, obj.user.last_name
         )
+
 
 @admin.register(ManagementOrganization)
 class ManagementOrganizationAdmin(admin.ModelAdmin):
@@ -365,12 +413,12 @@ class DomikAdmin(admin.ModelAdmin):
 
 @admin.register(Apartment)
 class ApartmentAdmin(admin.ModelAdmin):
-    list_display = ("number", "domik_link", "entrance", "residents_count")
+    list_display = ("number", "domik_link", "entrance", "residents_count", "keys_count")
     list_filter = ("domik",)
     search_fields = ("number", "domik__address")
     autocomplete_fields = ("domik",)
     ordering = ("domik__address", "number")
-    inlines = [ResidentInline]
+    inlines = [ResidentInline, ApartmentKeyInline]
     list_per_page = 50
 
     @admin.display(description="Дом", ordering="domik__address")
@@ -381,6 +429,73 @@ class ApartmentAdmin(admin.ModelAdmin):
     @admin.display(description="Жильцов")
     def residents_count(self, obj):
         return badge(str(obj.user_apartments.count()), "#0ea5e9")
+
+    @admin.display(description="Кодов")
+    def keys_count(self, obj):
+        count = obj.access_keys.count()
+        color = "#16a34a" if count else "#94a3b8"
+        return badge(str(count), color)
+
+
+@admin.register(ApartmentKey)
+class ApartmentKeyAdmin(admin.ModelAdmin):
+    list_display = (
+        "code_display", "purpose_badge", "apartment_link",
+        "domik_link", "created_by_link", "created_at",
+    )
+    list_display_links = ("code_display",)
+    list_filter = (KeyPurposeFilter, "created_at", "created_by")
+    search_fields = (
+        "code",
+        "apartment__number",
+        "apartment__domik__address",
+        "created_by__max_id", "created_by__name",
+    )
+    autocomplete_fields = ("apartment", "created_by")
+    ordering = ("-created_at",)
+    readonly_fields = ("id", "apartment", "code", "purpose", "created_by", "created_at")
+    list_per_page = 50
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+
+    @admin.display(description="Код", ordering="code")
+    def code_display(self, obj):
+        return format_html(
+            '<code style="font-size:14px;letter-spacing:1px;'
+            'background:#f1f5f9;padding:2px 8px;border-radius:4px;">{}</code>',
+            obj.code,
+        )
+
+    @admin.display(description="Назначение", ordering="purpose")
+    def purpose_badge(self, obj):
+        return badge(obj.get_purpose_display(), KEY_PURPOSE_COLORS.get(obj.purpose, "#64748b"))
+
+    @admin.display(description="Квартира", ordering="apartment__number")
+    def apartment_link(self, obj):
+        url = reverse("admin:apihandler_apartment_change", args=[obj.apartment.id])
+        return format_html('<a href="{}">кв. {}</a>', url, obj.apartment.number)
+
+    @admin.display(description="Дом", ordering="apartment__domik__address")
+    def domik_link(self, obj):
+        url = reverse("admin:apihandler_domik_change", args=[obj.apartment.domik.id])
+        return format_html('<a href="{}">{}</a>', url, obj.apartment.domik.address)
+
+    @admin.display(description="Создал", ordering="created_by__name")
+    def created_by_link(self, obj):
+        if not obj.created_by:
+            return "—"
+        url = reverse("admin:apihandler_user_change", args=[obj.created_by.id])
+        return format_html(
+            '<a href="{}">{} {}</a>', url, obj.created_by.name, obj.created_by.last_name
+        )
 
 
 @admin.register(UserApartment)
@@ -493,13 +608,31 @@ class AppealHistoryAdmin(admin.ModelAdmin):
             APPEAL_STATUS_COLORS.get(obj.status, "#64748b"),
         )
 
-class CapitalRepairWorkInline(admin.TabularInline):
-    model = CapitalRepairWork
-    extra = 0
-    fields = ("work_type", "planned_year", "status", "cost", "contractor")
-    verbose_name = "Работа"
-    verbose_name_plural = "Программа работ"
-    classes = ("collapse",)
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("title", "domik_link", "created_by_link", "created_at")
+    list_filter = ("created_at", "domik__management_org")
+    search_fields = ("title", "text", "domik__address", "created_by__name")
+    autocomplete_fields = ("domik", "created_by")
+    ordering = ("-created_at",)
+    readonly_fields = ("id", "created_at")
+    list_per_page = 30
+    date_hierarchy = "created_at"
+
+    @admin.display(description="Дом", ordering="domik__address")
+    def domik_link(self, obj):
+        url = reverse("admin:apihandler_domik_change", args=[obj.domik.id])
+        return format_html('<a href="{}">{}</a>', url, obj.domik.address)
+
+    @admin.display(description="Создал", ordering="created_by__name")
+    def created_by_link(self, obj):
+        if not obj.created_by:
+            return "—"
+        url = reverse("admin:apihandler_user_change", args=[obj.created_by.id])
+        return format_html(
+            '<a href="{}">{} {}</a>', url, obj.created_by.name, obj.created_by.last_name
+        )
 
 
 @admin.register(CapitalRepair)
