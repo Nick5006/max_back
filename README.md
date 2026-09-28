@@ -1,6 +1,6 @@
 # max_back
 
-**Commit:** `9d0cea6e8e3e0cc55ef6d97916b5428b0dd3b051`
+**Commit:** `3dff61877c8366cd3d4152f567d24b73cae18ed9`
 **API:** https://fancifully-fortified-bonito.cloudpub.ru
 
 Backend-сервис для управления многоквартирными домами: обращения жителей,
