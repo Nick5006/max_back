@@ -1973,10 +1973,6 @@ def user_apartment_delete_view(request, apartment_id):
     if request.method != "DELETE":
         return JsonResponse({"status": "Method not allowed"}, status=405)
 
-    code = (request.GET.get("code") or "").strip()
-    if not code:
-        return JsonResponse({"status": "Поле code обязательно"}, status=400)
-
     ua = UserApartment.objects.filter(
         user=request.user,
         apartment_id=apartment_id,
@@ -1985,25 +1981,10 @@ def user_apartment_delete_view(request, apartment_id):
     if ua is None:
         return JsonResponse({"status": "Квартира не найдена"}, status=404)
 
-    unbind_key = ApartmentKey.objects.filter(
-        apartment=ua.apartment,
-        purpose=ApartmentKey.Purpose.UNBIND,
-    ).first()
-    if unbind_key is None:
-        return JsonResponse(
-            {"status": "Для этой квартиры не сгенерирован код отвязки"},
-            status=403,
-        )
-
-    if unbind_key.code != code:
-        return JsonResponse({"status": "Неверный код доступа"}, status=403)
-
     was_primary = ua.is_primary
 
     with transaction.atomic():
         ua.delete()
-        unbind_key.delete()
-
         if was_primary:
             new_primary = UserApartment.objects.filter(user=request.user).first()
             if new_primary:
