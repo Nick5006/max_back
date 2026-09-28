@@ -1,0 +1,46 @@
+{
+  "description": "Тестовые данные для проверки основного сценария max_back",
+  "load_command": "docker compose exec web python manage.py load_demo --reset",
+  "organization": {
+    "name": "УК Тест",
+    "inn": "1234567890"
+  },
+  "users": [
+    {
+      "max_id": "uk_demo",
+      "name": "Сотрудник",
+      "last_name": "УК",
+      "password": "uk_demo_pass",
+      "is_jk": true,
+      "management_org_inn": "1234567890"
+    },
+    {
+      "max_id": "resident_demo",
+      "name": "Иван",
+      "last_name": "Жильцов",
+      "password": "resident_pass",
+      "is_jk": false,
+      "management_org_inn": null
+    }
+  ],
+  "domik": {
+    "address": "г. Тест, ул. Тестовая, д. 1",
+    "fias_id": "demo-fias-1",
+    "management_org_inn": "1234567890",
+    "apartments_count": 10,
+    "apartment_numbers": "1-10",
+    "entrance": "1"
+  },
+  "apartment_keys": [
+    {
+      "apartment_number": "1",
+      "purpose": "bind",
+      "code": "1234567890"
+    }
+  ],
+  "notes": [
+    "Код привязки одноразовый: после успешной привязки удаляется",
+    "Первая привязанная квартира становится основной (is_primary=true)",
+    "Пароли не используются для входа по API (login по max_id), но выставлены на случай Django admin"
+  ]
+}

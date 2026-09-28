@@ -1,6 +1,7 @@
 # max_back
 
-Хэш последнего коммита: d7b23688cfd070a4491a6ed7b5b26d1f64f69a3b
+**Commit:** `d7b23688cfd070a4491a6ed7b5b26d1f64f69a3b`
+**API:** https://fancifully-fortified-bonito.cloudpub.ru
 
 Backend-сервис для управления многоквартирными домами: обращения жителей,
 опросы, уведомления, капитальный ремонт, роли УК и жильцов.
@@ -118,8 +119,11 @@ max_back/
 ├── manage.py
 ├── README.md                          # этот файл
 ├── DOCS/
-│   ├── api.md                         # подробная текстовая документация API
-│   └── api.yaml                       # OpenAPI 3.0.3 спецификация
+│   ├── api.md                         # текстовая документация API
+│   ├── api.yaml                       # OpenAPI 3.0.3 спецификация
+│   └── DATA-API.yaml                  # описание обязательных проверок
+├── DATA/
+│   └── seed.json                      # описание тестового набора
 ├── certs/
 │   └── Russian_Trusted_Root_CA.cer    # корневой сертификат Минцифры
 ├── data/
@@ -151,7 +155,8 @@ max_back/
     │   └── collect.py                 # DaData + HouseScore
     └── management/
         └── commands/
-            └── sync_houses.py
+            ├── sync_houses.py
+            └── load_demo.py           # загрузка тестовых данных
 ```
 
 ---
@@ -188,6 +193,12 @@ cp .env.example .env
 python -c "from django.core.management.utils import get_random_secret_key as k; print(k())"
 ```
 
+### Загрузка тестовых данных (один раз)
+
+```bash
+docker compose exec web python manage.py load_demo
+```
+
 ### Запуск без публикации (только локально)
 
 Если не нужен внешний HTTPS-адрес, запускайте только `web`:
@@ -200,12 +211,6 @@ docker compose up --build web
 
 - API: `http://127.0.0.1:8000/api/v1/`
 - Админка: `http://127.0.0.1:8000/admin/`
-
-### Применение миграций вручную (при необходимости)
-
-```bash
-docker compose exec web python manage.py migrate
-```
 
 ### Создание суперпользователя админки
 
@@ -235,72 +240,57 @@ docker compose exec web python manage.py createsuperuser
 
 ## Тестовые данные и учётные записи
 
-> Перед проверкой нужно один раз создать тестовые данные.
-> Ниже — рекомендованный набор, который используется в разделе
-> [«Пошаговый сценарий проверки»](#пошаговый-сценарий-проверки).
-
-### Создание через Django shell
+### Быстрый старт
 
 ```bash
-docker compose exec web python manage.py shell
+docker compose exec web python manage.py load_demo
 ```
 
-```python
-from apihandler.models import (
-    ManagementOrganization, User, Domik, Apartment,
-    ApartmentKey, UserApartment,
-)
+Команда создаст (или обновит) демо-набор данных. Идемпотентна —
+повторный запуск не создаёт дублей.
 
-org = ManagementOrganization.objects.create(
-    name="УК Тест", inn="1234567890",
-)
+Если нужно предварительно удалить старые демо-данные:
 
-uk = User.objects.create_jkuser(
-    max_id="uk_demo", name="Сотрудник", last_name="УК",
-    management_org=org,
-)
-uk.set_password("uk_demo_pass")
-uk.save()
-
-resident = User.objects.create_user(
-    max_id="resident_demo", name="Иван", last_name="Жильцов",
-)
-resident.set_password("resident_pass")
-resident.save()
-
-domik = Domik.objects.create(
-    address="г. Тест, ул. Тестовая, д. 1",
-    fias_id="demo-fias-1",
-    management_org=org,
-)
-
-apartments = [
-    Apartment.objects.create(domik=domik, number=str(i), entrance="1")
-    for i in range(1, 11)
-]
-
-key = ApartmentKey.objects.create(
-    apartment=apartments[0],
-    code="1234567890",
-    purpose=ApartmentKey.Purpose.BIND,
-    created_by=uk,
-)
-print("Код привязки:", key.code)
+```bash
+docker compose exec web python manage.py load_demo --reset
 ```
 
-### Тестовые учётные записи
+Флаг `--reset` удаляет только демо-сущности по фиксированным
+`fias_id`, `max_id`, `inn` — боевые данные не пострадают.
 
-| Роль | max_id | Пароль | Что доступно |
+### Что создаётся
+
+| Сущность | Значение |
+|---|---|
+| УК | `УК Тест`, ИНН `1234567890` |
+| Сотрудник УК | `uk_demo` / `uk_demo_pass` |
+| Житель | `resident_demo` / `resident_pass` |
+| Дом | `г. Тест, ул. Тестовая, д. 1` (ФИАС `demo-fias-1`) |
+| Квартиры | 10 шт., номера 1–10, подъезд 1 |
+| Код привязки | `1234567890` для квартиры №1 |
+
+Описание набора — в файле [`DATA/seed.json`](./DATA/seed.json).
+
+### Учётные записи
+
+| Роль | max_id | Пароль | Доступ |
 |---|---|---|---|
-| Сотрудник УК | `uk_demo` | `uk_demo_pass` | Все ручки `/api/v1/uk/*`, админка |
-| Житель | `resident_demo` | `resident_pass` | Ручки `/api/v1/user/*`, `/api/v1/me` |
+| Сотрудник УК | `uk_demo` | `uk_demo_pass` | `/api/v1/uk/*`, `/admin/` |
+| Житель | `resident_demo` | `resident_pass` | `/api/v1/user/*`, `/api/v1/me` |
 | Админ | `admin` | создать через `createsuperuser` | `/admin/` |
 
-### Тестовые данные
+Пароли не используются для входа по API (авторизация идёт
+по `max_id` через `POST /api/v1/login`), но корректно выставлены
+для входа в Django admin.
 
-- **УК:** `УК Тест`, ИНН `1234567890`.
-- **Дом:** `г. Тест, ул. Тестовая, д. 1`, 10 квартир (номера 1–10, подъезд 1).
-- **Код привязки для квартиры №1:** `1234567890`.
+### Восстановление с чистого листа
+
+```bash
+docker compose down
+rm -rf ./data
+docker compose up --build -d
+docker compose exec web python manage.py load_demo
+```
 
 ---
 
@@ -480,6 +470,8 @@ docker compose exec web python manage.py test
 
 - [`api.md`](DOCS/api.md) — текстовая, с примерами запросов и ответов.
 - [`api.yaml`](DOCS/api.yaml) — спецификация OpenAPI 3.0.3.
+- [`DATA-API.yaml`](DOCS/DATA-API.yaml) — описание обязательных
+  проверок для автоматической оценки.
 
 ---
 
@@ -549,9 +541,12 @@ docker compose exec web python manage.py test
   `User`, `ManagementOrganization`, `Domik`, `Apartment`,
   `UserApartment`, `Appeal`, `AppealHistory`, `Poll`, `Choice`, `Vote`,
   `Notification`, `CapitalRepair`, `CapitalRepairWork`, `ApartmentKey`.
-- **Тестовые данные:** синтетические, создаются вручную через
-  `manage.py shell` (см. раздел «Тестовые данные и учётные записи»).
-  Реестр ГИС ЖКХ и внешние интеграции в MVP не используются.
+- **Тестовые данные:** синтетические, создаются командой
+  `python manage.py load_demo` (см. раздел
+  «Тестовые данные и учётные записи»).
+- **Внешние источники данных** (ГИС ЖКХ, DaData, HouseScore) в MVP
+  не подключены к основному сценарию. Команда `sync_houses` —
+  заготовка для масштабирования.
 
 ---
 
@@ -578,6 +573,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python manage.py migrate
+python manage.py load_demo
 python manage.py runserver
 ```
 
@@ -629,5 +625,5 @@ docker compose restart web
 
 ## Известные ограничения
 
-- **SQLite.** В проде рекомендуется PostgreSQL, но для хакатона SQLite
-  подходит и упрощает воспроизводимость.
+- **SQLite.** В проде рекомендуется PostgreSQL, но для хакатона
+  SQLite подходит и упрощает воспроизводимость.
