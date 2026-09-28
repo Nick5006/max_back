@@ -1,0 +1,610 @@
+# =============================================================================
+# DATA-API.yaml
+#
+# Служебный файл для автоматической проверки API платформой оценки
+# хакатона «Умный город». Содержит перечень обязательных проверок
+# основной функциональности решения.
+#
+# Формат — YAML, схема версии 1.
+# =============================================================================
+
+version: 1
+name: max_back
+team: max_back
+description: "Backend-сервис управления МКД для мини-приложения MAX. Проверяет сценарий жителя (вход, привязка квартиры, обращение, опрос, уведомления, капремонт) и сценарий сотрудника УК (обработка обращений, публикация опросов и уведомлений)."
+
+# Базовый адрес API. Замените на публичный HTTPS-адрес вашего сервиса.
+base_url: https://fancifully-fortified-bonito.cloudpub.ru
+
+# Все запросы идут с Content-Type: application/json, если не указано иное.
+default_headers:
+  Content-Type: application/json
+
+# -----------------------------------------------------------------------------
+# Роли тестовых учётных записей.
+# -----------------------------------------------------------------------------
+roles:
+  guest:
+    description: "Неавторизованный пользователь (без cookie sessionid)"
+  resident:
+    description: "Житель"
+    credentials:
+      max_id: resident_demo
+      name: "Иван"
+  uk:
+    description: "Сотрудник УК"
+    credentials:
+      max_id: uk_demo
+      name: "Сотрудник"
+      is_jk: true
+      management_org:
+        name: "УК Тест"
+        inn: "1234567890"
+  admin:
+    description: "Администратор (только при необходимости)"
+
+# =============================================================================
+# ОБЯЗАТЕЛЬНЫЕ ПРОВЕРКИ
+# =============================================================================
+
+checks:
+
+  # ---------------------------------------------------------------------------
+  # 1. Авторизация
+  # ---------------------------------------------------------------------------
+
+  - id: login-resident
+    name: "Вход/регистрация жителя"
+    method: POST
+    path: /api/v1/login
+    role: guest
+    body:
+      max_id: resident_demo
+      name: "Иван"
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - status
+        - id
+        - is_jk
+
+  - id: login-uk
+    name: "Вход/регистрация сотрудника УК"
+    method: POST
+    path: /api/v1/login
+    role: guest
+    body:
+      max_id: uk_demo
+      name: "Сотрудник"
+      is_jk: true
+      management_org:
+        name: "УК Тест"
+        inn: "1234567890"
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - status
+        - id
+        - is_jk
+        - management_org.id
+        - management_org.name
+        - management_org.inn
+
+  - id: login-invalid
+    name: "Вход с неполными данными"
+    method: POST
+    path: /api/v1/login
+    role: guest
+    body:
+      name: "Иван"
+    expected:
+      status: [ 400 ]
+      content_type: application/json
+      fields:
+        - status
+
+  # ---------------------------------------------------------------------------
+  # 2. Профиль
+  # ---------------------------------------------------------------------------
+
+  - id: me-resident
+    name: "Профиль жителя"
+    method: GET
+    path: /api/v1/me
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - id
+        - max_id
+        - name
+        - is_jk
+        - apartments
+
+  - id: me-unauthorized
+    name: "Профиль без авторизации"
+    method: GET
+    path: /api/v1/me
+    role: guest
+    expected:
+      status: [ 401 ]
+
+  # ---------------------------------------------------------------------------
+  # 3. Поиск дома и привязка квартиры
+  # ---------------------------------------------------------------------------
+
+  - id: search-domiks
+    name: "Поиск дома по адресу"
+    method: GET
+    path: /api/v1/domiks
+    role: resident
+    query:
+      search: "Тест"
+      limit: 10
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - domiks
+        - domiks[].id
+        - domiks[].address
+
+  - id: bind-apartment
+    name: "Привязка квартиры по коду"
+    method: POST
+    path: /api/v1/user/apartments
+    role: resident
+    body:
+      domik_id: "{{domik_id}}"
+      number: "1"
+      code: "1234567890"
+    expected:
+      status: [ 201 ]
+      content_type: application/json
+      fields:
+        - id
+        - number
+        - domik_id
+        - role
+        - is_primary
+
+  - id: list-user-apartments
+    name: "Список квартир пользователя"
+    method: GET
+    path: /api/v1/user/apartments
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - apartments
+
+  # ---------------------------------------------------------------------------
+  # 4. Сценарий жителя: обращения
+  # ---------------------------------------------------------------------------
+
+  - id: create-appeal
+    name: "Создание обращения жителем"
+    method: POST
+    path: /api/v1/user/appeals
+    role: resident
+    body:
+      apartment_id: "{{apartment_id}}"
+      title: "Не работает лифт"
+      description: "Лифт не работает со вчера"
+    expected:
+      status: [ 201 ]
+      content_type: application/json
+      fields:
+        - id
+        - title
+        - description
+        - status
+        - created_at
+
+  - id: list-user-appeals
+    name: "Список обращений жителя"
+    method: GET
+    path: /api/v1/user/appeals
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - appeals
+
+  - id: appeal-detail
+    name: "Детали обращения жителя"
+    method: GET
+    path: /api/v1/user/appeals/{{appeal_id}}
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - id
+        - title
+        - description
+        - status
+        - status_display
+        - domik.id
+        - history
+
+  # ---------------------------------------------------------------------------
+  # 5. Сценарий УК: обработка обращений
+  # ---------------------------------------------------------------------------
+
+  - id: uk-list-appeals
+    name: "Список обращений по домам УК"
+    method: GET
+    path: /api/v1/uk/appeals
+    role: uk
+    query:
+      status: new
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - appeals
+
+  - id: uk-appeal-detail
+    name: "Детали обращения (УК)"
+    method: GET
+    path: /api/v1/uk/appeals/{{appeal_id}}
+    role: uk
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - id
+        - title
+        - author
+        - domik
+        - history
+
+  - id: uk-update-appeal-status
+    name: "Изменение статуса обращения"
+    method: POST
+    path: /api/v1/uk/appeals/{{appeal_id}}/status
+    role: uk
+    body:
+      status: in_progress
+      text: "Передано мастеру"
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - status
+        - appeal_id
+        - new_status
+        - status_display
+
+  - id: uk-update-appeal-status-invalid
+    name: "Неверный статус обращения"
+    method: POST
+    path: /api/v1/uk/appeals/{{appeal_id}}/status
+    role: uk
+    body:
+      status: invalid_status
+    expected:
+      status: [ 400 ]
+      content_type: application/json
+      fields:
+        - status
+        - allowed
+
+  # ---------------------------------------------------------------------------
+  # 6. Опросы
+  # ---------------------------------------------------------------------------
+
+  - id: uk-create-poll
+    name: "Создание опроса УК"
+    method: POST
+    path: /api/v1/uk/polls
+    role: uk
+    body:
+      domik_id: "{{domik_id}}"
+      title: "Ремонт подъезда"
+      description: "Голосуем за ремонт"
+      choices:
+        - "За"
+        - "Против"
+    expected:
+      status: [ 201 ]
+      content_type: application/json
+      fields:
+        - id
+        - title
+        - domik
+        - choices
+        - total_votes
+
+  - id: user-list-polls
+    name: "Список опросов жителя"
+    method: GET
+    path: /api/v1/user/polls
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - polls
+
+  - id: user-poll-detail
+    name: "Детали опроса"
+    method: GET
+    path: /api/v1/user/polls/{{poll_id}}
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - id
+        - title
+        - choices
+        - user_voted
+
+  - id: user-vote-poll
+    name: "Голосование в опросе"
+    method: POST
+    path: /api/v1/user/polls/{{poll_id}}/vote
+    role: resident
+    body:
+      choice_id: "{{choice_id}}"
+    expected:
+      status: [ 200, 201 ]
+      content_type: application/json
+      fields:
+        - status
+        - poll_id
+        - choice_id
+        - total_votes
+
+  - id: user-poll-results
+    name: "Результаты опроса"
+    method: GET
+    path: /api/v1/user/polls/{{poll_id}}/results
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - poll_id
+        - title
+        - total_votes
+        - results
+
+  - id: uk-close-poll
+    name: "Закрытие опроса УК"
+    method: POST
+    path: /api/v1/uk/polls/{{poll_id}}/close
+    role: uk
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - status
+        - poll_id
+        - is_active
+
+  # ---------------------------------------------------------------------------
+  # 7. Уведомления
+  # ---------------------------------------------------------------------------
+
+  - id: uk-create-notification
+    name: "Публикация уведомления УК"
+    method: POST
+    path: /api/v1/uk/notifications
+    role: uk
+    body:
+      domik_id: "{{domik_id}}"
+      title: "Отключение воды"
+      text: "12 января с 10:00 до 14:00"
+    expected:
+      status: [ 201 ]
+      content_type: application/json
+      fields:
+        - status
+        - notification.id
+        - notification.title
+        - notification.text
+        - notification.created_at
+        - notification.domik.id
+
+  - id: user-list-notifications
+    name: "Список уведомлений жителя"
+    method: GET
+    path: /api/v1/user/notifications
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - notifications
+
+  - id: user-notification-detail
+    name: "Детали уведомления (житель)"
+    method: GET
+    path: /api/v1/user/notifications/{{notification_id}}
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - id
+        - title
+        - text
+        - created_at
+        - domik.id
+        - management_org
+
+  # ---------------------------------------------------------------------------
+  # 8. Капитальный ремонт
+  # ---------------------------------------------------------------------------
+
+  - id: uk-create-capital-repair
+    name: "Создание счёта капремонта"
+    method: POST
+    path: /api/v1/uk/domiks/{{domik_id}}/capital-repair
+    role: uk
+    body:
+      tariff_per_sqm: "12.50"
+    expected:
+      status: [ 201, 409 ]
+      content_type: application/json
+      fields:
+        - status
+
+  - id: uk-update-capital-repair
+    name: "Обновление показателей капремонта"
+    method: PATCH
+    path: /api/v1/uk/domiks/{{domik_id}}/capital-repair
+    role: uk
+    body:
+      collected_total: "100000.00"
+      spent_total: "45000.00"
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - status
+        - capital_repair.id
+        - capital_repair.balance
+        - updated_fields
+
+  - id: uk-create-capital-repair-work
+    name: "Добавление работы по капремонту"
+    method: POST
+    path: /api/v1/uk/domiks/{{domik_id}}/capital-repair/works
+    role: uk
+    body:
+      work_type: "Ремонт кровли"
+      planned_year: 2025
+      status: planned
+      cost: "500000.00"
+      contractor: "ООО Строй"
+    expected:
+      status: [ 201 ]
+      content_type: application/json
+      fields:
+        - status
+        - work.id
+        - work.work_type
+        - work.planned_year
+        - work.status
+
+  - id: user-capital-repair
+    name: "Капремонт для жителя"
+    method: GET
+    path: /api/v1/user/domik/{{domik_id}}/capital-repair
+    role: resident
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - domik.id
+        - capital_repair
+        - works
+
+  # ---------------------------------------------------------------------------
+  # 9. Управление домами и квартирами (УК)
+  # ---------------------------------------------------------------------------
+
+  - id: uk-list-domiks
+    name: "Список домов УК"
+    method: GET
+    path: /api/v1/uk/domiks
+    role: uk
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - domiks
+
+  - id: uk-domik-detail
+    name: "Детали дома"
+    method: GET
+    path: /api/v1/uk/domiks/{{domik_id}}
+    role: uk
+    expected:
+      status: [ 200 ]
+      content_type: application/json
+      fields:
+        - id
+        - address
+        - apartments
+
+  - id: uk-generate-key
+    name: "Генерация кода привязки"
+    method: POST
+    path: /api/v1/uk/domiks/{{domik_id}}/apartments/{{apartment_id}}/generate-key
+    role: uk
+    expected:
+      status: [ 200, 201 ]
+      content_type: application/json
+      fields:
+        - status
+        - apartment_id
+        - code
+        - purpose
+
+  # ---------------------------------------------------------------------------
+  # 10. Проверки безопасности
+  # ---------------------------------------------------------------------------
+
+  - id: user-cannot-access-uk
+    name: "Житель не имеет доступа к ручкам УК"
+    method: GET
+    path: /api/v1/uk/domiks
+    role: resident
+    expected:
+      status: [ 403 ]
+      content_type: application/json
+      fields:
+        - status
+
+  - id: guest-cannot-access-uk
+    name: "Гость не имеет доступа к ручкам УК"
+    method: GET
+    path: /api/v1/uk/domiks
+    role: guest
+    expected:
+      status: [ 401 ]
+
+  - id: user-cannot-vote-as-uk
+    name: "УК не может голосовать в опросе"
+    method: POST
+    path: /api/v1/user/polls/{{poll_id}}/vote
+    role: uk
+    body:
+      choice_id: "{{choice_id}}"
+    expected:
+      status: [ 403 ]
+      content_type: application/json
+      fields:
+        - status
+
+  - id: resident-cannot-update-appeal-status
+    name: "Житель не может менять статус обращения"
+    method: POST
+    path: /api/v1/uk/appeals/{{appeal_id}}/status
+    role: resident
+    body:
+      status: done
+    expected:
+      status: [ 403 ]
+
+# =============================================================================
+# Переменные для подстановки в пути и тело запросов.
+# Платформа оценки заполняет их по мере прохождения проверок.
+# =============================================================================
+variables:
+  domik_id: "извлекается из search-domiks -> domiks[0].id"
+  apartment_id: "извлекается из bind-apartment -> id"
+  appeal_id: "извлекается из create-appeal -> id"
+  poll_id: "извлекается из uk-create-poll -> id"
+  choice_id: "извлекается из uk-create-poll -> choices[0].id"
+  notification_id: "извлекается из uk-create-notification -> notification.id"

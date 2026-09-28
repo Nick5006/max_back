@@ -19,10 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 
-SECRET_KEY = os.environ.get(
-    "SECRET_KEY",
-    "django-insecure-cr)nt5yh6s8jo)ceh+=@tu+i+ff%gi-r&h6!u_nce83qa%$kz1",
-)
+SECRET_KEY = os.environ["SECRET_KEY"]
 
 MAX_BOT_TOKEN = os.environ.get("MAX_BOT_TOKEN")
 MAX_API_BASE_URL = os.environ.get("MAX_API_BASE_URL")
