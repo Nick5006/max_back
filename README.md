@@ -459,7 +459,7 @@ docker compose exec web python manage.py load_demo
 docker compose exec web python manage.py test
 ```
 
-Все тесты из `apihandler/tests.py` должны пройти без ошибок.
+Все тесты из `apihandler/tmp_tests.py` должны пройти без ошибок.
 
 ---
 

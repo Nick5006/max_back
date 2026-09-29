@@ -23,6 +23,9 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 
 MAX_BOT_TOKEN = os.environ.get("MAX_BOT_TOKEN")
 MAX_API_BASE_URL = os.environ.get("MAX_API_BASE_URL")
+DADATA_TOKEN  = os.environ.get("DADATA_TOKEN")
+DADATA_SECRET_TOKEN = os.environ.get("DADATA_SECRET_TOKEN")
+HOUSESCORE_KEY = os.environ.get("HOUSESCORE_KEY")
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
 
