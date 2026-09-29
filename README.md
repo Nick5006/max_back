@@ -121,9 +121,8 @@ max_back/
 ├── DOCS/
 │   ├── api.md                         # текстовая документация API
 │   ├── api.yaml                       # OpenAPI 3.0.3 спецификация
+│   ├── seed.json                      # описание тестового набора
 │   └── DATA-API.yaml                  # описание обязательных проверок
-├── DATA/
-│   └── seed.json                      # описание тестового набора
 ├── certs/
 │   └── Russian_Trusted_Root_CA.cer    # корневой сертификат Минцифры
 ├── data/
