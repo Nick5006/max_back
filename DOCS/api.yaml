@@ -132,10 +132,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [domik_id, number, code]
+              required: [ code ]
               properties:
-                domik_id: { type: string, format: uuid }
-                number: { type: string }
                 code: { type: string, minLength: 10, maxLength: 10 }
       responses:
         '201':

@@ -334,32 +334,24 @@ def create_apartment(request):
     if error:
         return error
 
-    domik_id = data.get("domik_id")
-    number = data.get("number")
     code = (data.get("code") or "").strip()
-
-    if not domik_id or not number or not code:
+    if not code:
         return JsonResponse(
-            {"status": "Поля domik_id, number и code обязательны"},
+            {"status": "Поле code обязательно"},
             status=400,
         )
 
-    apartment = Apartment.objects.filter(domik_id=domik_id, number=number).first()
-    if apartment is None:
-        return JsonResponse({"status": "Квартира не найдена"}, status=404)
+    access_key = (
+        ApartmentKey.objects
+        .select_related("apartment", "apartment__domik", "apartment__domik__management_org")
+        .filter(code=code)
+        .first()
+    )
 
-    access_key = ApartmentKey.objects.filter(
-        apartment=apartment,
-        purpose=ApartmentKey.Purpose.BIND,
-    ).first()
     if access_key is None:
-        return JsonResponse(
-            {"status": "Для этой квартиры не сгенерирован код доступа"},
-            status=403,
-        )
-
-    if access_key.code != code:
         return JsonResponse({"status": "Неверный код доступа"}, status=403)
+
+    apartment = access_key.apartment
 
     is_first = not UserApartment.objects.filter(user=request.user).exists()
 
@@ -374,12 +366,16 @@ def create_apartment(request):
 
     if not created:
         return JsonResponse({"status": "Квартира уже добавлена"}, status=409)
+
     access_key.delete()
 
     return JsonResponse({
         "id": str(apartment.id),
         "number": apartment.number,
+        "entrance": apartment.entrance,
         "domik_id": str(apartment.domik_id),
+        "domik_address": apartment.domik.address,
+        "management_org": serialize_management_org(apartment.domik.management_org),
         "role": user_apartment.role,
         "is_primary": user_apartment.is_primary,
     }, status=201)
