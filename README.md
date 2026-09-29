@@ -139,7 +139,14 @@ max_back/
     ├── models.py
     ├── views.py
     ├── utils.py
-    ├── tests.py
+    ├── tests/
+    │   ├── base.py
+    │   ├── test_auth_profile.py
+    │   ├── test_capital_repair.py
+    │   ├── test_models.py
+    │   ├── test_polls_notifications.py
+    │   ├── test_uk_houses_appeals.py
+    │   └── test_user_apartments_appeals.py
     ├── migrations/
     ├── serializers/
     │   ├── appeal.py
